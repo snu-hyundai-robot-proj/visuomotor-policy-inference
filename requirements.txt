@@ -1,0 +1,11 @@
+# Server deps
+fastapi>=0.110
+uvicorn[standard]>=0.27
+pydantic>=2.0
+pillow>=10.0
+numpy>=1.24
+requests>=2.31
+
+# LeRobot — MUST come from the snu-hyundai-robot-proj fork: the model uses the
+# custom FlowMatch diffusion scheduler that is not present in upstream/PyPI lerobot.
+lerobot @ git+https://github.com/snu-hyundai-robot-proj/lerobot.git@main
