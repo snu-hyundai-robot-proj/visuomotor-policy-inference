@@ -29,6 +29,20 @@ htmlcov/
 *.log
 logs/
 
+# ROS 2 / colcon (created when building the ros2_* packages in a workspace)
+install/
+log/
+*.colcon
+COLCON_IGNORE
+
+# Docker: local machine-specific override (bind mounts, host paths) — keep it local.
+# The committed full stack is docker-compose.full.yml.
+docker-compose.override.yml
+
+# Benchmark / run outputs
+bench_*.json
+*.out
+
 # Model weights / HF cache (downloaded at runtime — never commit these)
 .cache/
 hf-cache/

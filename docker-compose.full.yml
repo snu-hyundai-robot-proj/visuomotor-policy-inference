@@ -1,0 +1,64 @@
+# Full software stack in one shot:
+#   inference (GPU policy server) + frontend (web console) + rosbridge (web<->ROS2).
+#
+#   docker compose -f docker-compose.full.yml up --build
+#
+# NOTE: the robot-side ROS2 nodes (HDR35/DG5F drivers, vpi_robot_client, Episode Manager,
+# cameras) run on the HOST — they need hardware/device access and the system_Teleop
+# workspace. `rosbridge` uses host networking so the browser console reaches those host
+# nodes. So this compose = "server + console"; bring the robot nodes up on the host.
+name: vpi
+
+services:
+  # --- GPU policy inference server (reuses the already-downloaded HF cache) ---
+  inference:
+    build: .
+    image: visuomotor-policy-inference:latest
+    container_name: vpi-inference
+    ports:
+      - "8000:8000"
+    environment:
+      - VPI_MODEL_ID=Ngseo/hyundai-uiwang-left-flowmatch
+      - VPI_DEVICE=cuda
+      - HF_HOME=/hf
+      - HF_HUB_OFFLINE=1            # model is cached; don't hit the Hub at startup
+    volumes:
+      - /home/bi/.cache/huggingface:/hf
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request,sys; sys.exit(0 if urllib.request.urlopen('http://localhost:8000/health').getcode()==200 else 1)"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+      start_period: 120s
+    restart: unless-stopped
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: 1
+              capabilities: [gpu]
+
+  # --- web console (static; talks to ROS2 via rosbridge) ---
+  frontend:
+    image: nginx:alpine
+    container_name: vpi-frontend
+    ports:
+      - "8080:80"
+    volumes:
+      - ./frontend:/usr/share/nginx/html:ro
+    restart: unless-stopped
+
+  # --- web <-> ROS2 bridge (host net so it shares the host ROS2 graph) ---
+  rosbridge:
+    image: ros:humble-ros-base
+    container_name: vpi-rosbridge
+    network_mode: host
+    environment:
+      - ROS_DOMAIN_ID=${ROS_DOMAIN_ID:-0}
+    command: >
+      bash -lc "apt-get update &&
+                apt-get install -y --no-install-recommends ros-humble-rosbridge-suite &&
+                source /opt/ros/humble/setup.bash &&
+                ros2 launch rosbridge_server rosbridge_websocket_launch.xml"
+    restart: unless-stopped

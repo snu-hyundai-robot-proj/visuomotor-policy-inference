@@ -9,6 +9,12 @@ robot state vector; it returns the next action. Ships with a Dockerfile and a
 - Framework: FastAPI + Uvicorn
 - Policy: LeRobot Diffusion Policy with the `FlowMatch` scheduler (`num_inference_steps=1`)
 
+## Performance
+
+Benchmarked on an **NVIDIA GeForce RTX 3060 (12 GB)** (torch 2.10.0+cu128 / CUDA 12.8):
+**model inference runs at ~40 Hz** (one diffusion forward ≈ 24 ms), with ~1.4 GB VRAM.
+Reproduce with `python scripts/benchmark.py --device cuda`.
+
 > **Important:** the model uses the **FlowMatch** scheduler, a custom addition in the
 > [`snu-hyundai-robot-proj/lerobot`](https://github.com/snu-hyundai-robot-proj/lerobot) fork.
 > `requirements.txt` installs `lerobot` from that fork — **upstream/PyPI lerobot will not load this model.**

@@ -1,0 +1,145 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>Episode Control</title>
+<script src="https://cdn.jsdelivr.net/npm/roslib@1/build/roslib.min.js"></script>
+<style>
+  :root{
+    --bg:#0f1216; --panel:#171c23; --line:#283039; --txt:#e6edf3; --mut:#8b97a4;
+    --ok:#2ea043; --warn:#d29922; --bad:#f85149; --accent:#388bfd;
+  }
+  *{box-sizing:border-box} body{margin:0;background:var(--bg);color:var(--txt);
+    font-family:ui-sans-serif,system-ui,"Segoe UI",Roboto,sans-serif;}
+  .wrap{max-width:880px;margin:0 auto;padding:20px;}
+  h1{font-size:20px;margin:0 0 4px} .sub{color:var(--mut);font-size:13px;margin-bottom:16px}
+  .row{display:flex;gap:12px;flex-wrap:wrap}
+  .panel{background:var(--panel);border:1px solid var(--line);border-radius:12px;padding:16px;margin-bottom:14px}
+  .conn{display:flex;align-items:center;gap:8px;font-size:13px}
+  .dot{width:10px;height:10px;border-radius:50%;background:var(--bad)}
+  .dot.on{background:var(--ok)}
+  input{background:#0d1117;border:1px solid var(--line);color:var(--txt);border-radius:8px;padding:7px 10px;font-size:13px}
+  .state-big{font-size:34px;font-weight:700;letter-spacing:1px}
+  .state-BOOT{color:var(--mut)} .state-HOMING{color:var(--warn)} .state-READY{color:var(--accent)}
+  .state-RUNNING{color:var(--ok)} .state-STOPPING{color:var(--warn)} .state-FAULT{color:var(--bad)}
+  .meta{color:var(--mut);font-size:13px;margin-top:6px}
+  .btns{display:grid;grid-template-columns:repeat(2,1fr);gap:12px}
+  button{font-size:16px;font-weight:600;border:none;border-radius:10px;padding:16px;cursor:pointer;color:#fff;transition:filter .1s}
+  button:hover:not(:disabled){filter:brightness(1.12)} button:disabled{opacity:.35;cursor:not-allowed}
+  .b-home{background:#1f6feb} .b-start{background:var(--ok)} .b-stop{background:#8957e5}
+  .b-clear{background:#6e7681} .b-estop{background:var(--bad);grid-column:1/3}
+  .health{display:flex;gap:14px;flex-wrap:wrap;font-size:13px}
+  .chip{display:flex;align-items:center;gap:6px;color:var(--mut)}
+  .log{font-family:ui-monospace,monospace;font-size:12px;color:var(--mut);background:#0d1117;
+    border:1px solid var(--line);border-radius:8px;padding:10px;height:120px;overflow:auto;white-space:pre-wrap}
+  label{font-size:12px;color:var(--mut);margin-right:6px}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <h1>Episode Control</h1>
+  <div class="sub">visuomotor policy — HDR35 / DG5F 에피소드 실행 콘솔</div>
+
+  <div class="panel">
+    <div class="row" style="justify-content:space-between;align-items:center">
+      <div class="conn"><span id="dot" class="dot"></span><span id="connTxt">disconnected</span></div>
+      <div><label>rosbridge</label><input id="url" size="22" value="ws://localhost:9090" />
+        <button style="padding:7px 12px;font-size:13px;background:#30363d" onclick="connect()">connect</button></div>
+    </div>
+  </div>
+
+  <div class="panel">
+    <div class="state-big state-BOOT" id="stateTxt">—</div>
+    <div class="meta" id="meta">episode —s · remaining — · policy OFF</div>
+    <div class="meta" id="fault" style="color:var(--bad)"></div>
+    <div class="health" id="health" style="margin-top:12px"></div>
+  </div>
+
+  <div class="panel">
+    <div class="btns">
+      <button class="b-home"  id="bHome"  onclick="callTrig('/episode/home','HOME')">⌂ HOME</button>
+      <button class="b-start" id="bStart" onclick="callTrig('/episode/start','START')">▶ START</button>
+      <button class="b-stop"  id="bStop"  onclick="callTrig('/episode/stop','STOP')">■ STOP</button>
+      <button class="b-clear" id="bClear" onclick="callTrig('/episode/clear_fault','CLEAR')">⟳ CLEAR FAULT</button>
+      <button class="b-estop" id="bEstop" onclick="toggleEstop()">⛔ E-STOP (off)</button>
+    </div>
+  </div>
+
+  <div class="panel">
+    <div class="log" id="log"></div>
+  </div>
+</div>
+
+<script>
+let ros=null, statusSub=null, estopPub=null, estopOn=false;
+const HEALTH_KEYS=[["front_cam","front cam"],["wrist_cam","wrist cam"],["state","state"],["server","server"],["ft","FT"]];
+
+function log(m){const el=document.getElementById('log');
+  el.textContent += (new Date().toLocaleTimeString()+"  "+m+"\n"); el.scrollTop=el.scrollHeight;}
+
+function connect(){
+  const url=document.getElementById('url').value.trim();
+  if(ros){try{ros.close()}catch(e){}}
+  ros=new ROSLIB.Ros({url});
+  ros.on('connection',()=>{setConn(true);log('connected '+url); subscribe();});
+  ros.on('error',(e)=>{setConn(false);log('error: '+(e&&e.message||e));});
+  ros.on('close',()=>{setConn(false);log('connection closed');});
+}
+function setConn(ok){document.getElementById('dot').className='dot'+(ok?' on':'');
+  document.getElementById('connTxt').textContent=ok?'connected':'disconnected';
+  if(!ok){applyState({state:'—'});}}
+
+function subscribe(){
+  statusSub=new ROSLIB.Topic({ros,name:'/episode/status',messageType:'std_msgs/String'});
+  statusSub.subscribe((msg)=>{ try{applyState(JSON.parse(msg.data));}catch(e){log('bad status json');} });
+  estopPub=new ROSLIB.Topic({ros,name:'/episode/estop',messageType:'std_msgs/Bool'});
+}
+
+function callTrig(name,label){
+  if(!ros){log('not connected');return;}
+  const cli=new ROSLIB.Service({ros,name,serviceType:'std_srvs/Trigger'});
+  log(label+' →');
+  cli.callService(new ROSLIB.ServiceRequest({}),
+    (res)=>log('  '+label+': '+(res.success?'ok':'fail')+(res.message?(' — '+res.message):'')),
+    (err)=>log('  '+label+' error: '+err));
+}
+function toggleEstop(){
+  if(!estopPub){log('not connected');return;}
+  estopOn=!estopOn;
+  estopPub.publish(new ROSLIB.Message({data:estopOn}));
+  const b=document.getElementById('bEstop');
+  b.textContent='⛔ E-STOP ('+(estopOn?'ON — latched':'off')+')';
+  b.style.filter=estopOn?'brightness(1.3)':'';
+  log('E-STOP '+(estopOn?'ENGAGED':'released'));
+}
+
+function applyState(s){
+  const st=s.state||'—';
+  const el=document.getElementById('stateTxt');
+  el.textContent=st; el.className='state-big state-'+st;
+  document.getElementById('meta').textContent=
+    `episode ${fmt(s.episode_elapsed_s)}s · remaining ${s.episodes_remaining??'—'} · policy ${s.policy_enabled?'ON':'OFF'}`;
+  document.getElementById('fault').textContent=
+    (st==='FAULT'&&s.fault_reason)?('fault: '+s.fault_reason):
+    (s.last_termination?('last end: '+s.last_termination):'');
+  // health chips
+  const h=s.health||{}; const cont=document.getElementById('health'); cont.innerHTML='';
+  HEALTH_KEYS.forEach(([k,lbl])=>{
+    const ok=!!h[k]; const c=document.createElement('div'); c.className='chip';
+    c.innerHTML=`<span class="dot${ok?' on':''}"></span>${lbl}`; cont.appendChild(c);
+  });
+  // enable/disable buttons by state
+  setEnabled('bStart', st==='READY');
+  setEnabled('bStop',  st==='RUNNING');
+  setEnabled('bHome',  st!=='FAULT' && st!=='HOMING');
+  setEnabled('bClear', st==='FAULT');
+}
+function fmt(x){return (typeof x==='number')?x.toFixed(1):'—';}
+function setEnabled(id,on){document.getElementById(id).disabled=!on;}
+
+// auto-connect on load
+connect();
+</script>
+</body>
+</html>
