@@ -60,6 +60,22 @@ class PolicyRunner:
         self.state_dim = int(policy.config.input_features[STATE_KEY].shape[0])
         self.action_dim = int(policy.config.output_features[ACTION_KEY].shape[0])
         self.cameras = [k for k in policy.config.input_features if "image" in k]
+        # Expected (H, W) per camera (shape is (C, H, W)). The two camera views are
+        # stacked together inside the policy, so each frame must be resized to its
+        # declared size first — real cameras (Zivid vs RealSense) differ in resolution.
+        self.image_hw = {
+            k: (int(policy.config.input_features[k].shape[1]), int(policy.config.input_features[k].shape[2]))
+            for k in self.cameras
+        }
+
+    @staticmethod
+    def _fit(img: np.ndarray, hw: tuple[int, int]) -> np.ndarray:
+        """Resize RGB uint8 (H, W, 3) to (H, W) = hw if needed (bilinear)."""
+        h, w = hw
+        if img.shape[0] == h and img.shape[1] == w:
+            return img
+        resized = Image.fromarray(np.asarray(img, dtype=np.uint8)).resize((w, h), Image.BILINEAR)
+        return np.asarray(resized, dtype=np.uint8)
 
     def reset(self) -> None:
         with self._lock:
@@ -69,6 +85,8 @@ class PolicyRunner:
     def predict(self, front_rgb: np.ndarray, wrist_rgb: np.ndarray, state: np.ndarray) -> np.ndarray:
         if state.shape[-1] != self.state_dim:
             raise ValueError(f"state must have {self.state_dim} dims, got {state.shape[-1]}")
+        front_rgb = self._fit(front_rgb, self.image_hw.get(FRONT_KEY, front_rgb.shape[:2]))
+        wrist_rgb = self._fit(wrist_rgb, self.image_hw.get(WRIST_KEY, wrist_rgb.shape[:2]))
         obs = {
             FRONT_KEY: torch.from_numpy(front_rgb).float().div(255).permute(2, 0, 1).unsqueeze(0).to(self.device),
             WRIST_KEY: torch.from_numpy(wrist_rgb).float().div(255).permute(2, 0, 1).unsqueeze(0).to(self.device),

@@ -4,7 +4,7 @@
 <meta charset="UTF-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1.0" />
 <title>Episode Control</title>
-<script src="https://cdn.jsdelivr.net/npm/roslib@1/build/roslib.min.js"></script>
+<script src="roslib.min.js" onerror="window.__roslibFailed=true"></script>
 <style>
   :root{
     --bg:#0f1216; --panel:#171c23; --line:#283039; --txt:#e6edf3; --mut:#8b97a4;
@@ -28,12 +28,21 @@
   button{font-size:16px;font-weight:600;border:none;border-radius:10px;padding:16px;cursor:pointer;color:#fff;transition:filter .1s}
   button:hover:not(:disabled){filter:brightness(1.12)} button:disabled{opacity:.35;cursor:not-allowed}
   .b-home{background:#1f6feb} .b-start{background:var(--ok)} .b-stop{background:#8957e5}
-  .b-clear{background:#6e7681} .b-estop{background:var(--bad);grid-column:1/3}
+  .b-clear{background:#6e7681}
+  .b-replay{background:#0e8a8a;grid-column:1/3} .b-estop{background:var(--bad);grid-column:1/3}
   .health{display:flex;gap:14px;flex-wrap:wrap;font-size:13px}
   .chip{display:flex;align-items:center;gap:6px;color:var(--mut)}
   .log{font-family:ui-monospace,monospace;font-size:12px;color:var(--mut);background:#0d1117;
     border:1px solid var(--line);border-radius:8px;padding:10px;height:120px;overflow:auto;white-space:pre-wrap}
   label{font-size:12px;color:var(--mut);margin-right:6px}
+  .side-sel{display:flex;gap:8px}
+  .side-btn{padding:8px 18px;font-size:14px;border-radius:8px;background:#21262d;border:1px solid var(--line);
+    color:var(--mut);cursor:pointer}
+  .side-btn.active{background:var(--accent);color:#fff;border-color:var(--accent)}
+  .cams{display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-top:12px}
+  .cam{background:#0d1117;border:1px solid var(--line);border-radius:8px;overflow:hidden}
+  .cam .hd{font-size:12px;color:var(--mut);padding:6px 10px;border-bottom:1px solid var(--line)}
+  .cam img{display:block;width:100%;height:auto;background:#000;min-height:160px;object-fit:contain}
 </style>
 </head>
 <body>
@@ -50,6 +59,22 @@
   </div>
 
   <div class="panel">
+    <div class="row" style="justify-content:space-between;align-items:center">
+      <div class="side-sel">
+        <button class="side-btn" id="sideLeft"  onclick="setSide('left', true)">◀ LEFT</button>
+        <button class="side-btn" id="sideRight" onclick="setSide('right', true)">RIGHT ▶</button>
+      </div>
+      <div class="meta">viewing side: <b id="sideTxt">—</b> · streams from <span id="videoHost">:8090</span></div>
+    </div>
+    <div class="cams">
+      <div class="cam"><div class="hd">front · Zivid (<span id="frontTopic">—</span>)</div>
+        <img id="frontCam" alt="no front stream" onerror="camErr(this)"></div>
+      <div class="cam"><div class="hd">wrist · RealSense (<span id="wristTopic">—</span>)</div>
+        <img id="wristCam" alt="no wrist stream" onerror="camErr(this)"></div>
+    </div>
+  </div>
+
+  <div class="panel">
     <div class="state-big state-BOOT" id="stateTxt">—</div>
     <div class="meta" id="meta">episode —s · remaining — · policy OFF</div>
     <div class="meta" id="fault" style="color:var(--bad)"></div>
@@ -62,6 +87,7 @@
       <button class="b-start" id="bStart" onclick="callTrig('/episode/start','START')">▶ START</button>
       <button class="b-stop"  id="bStop"  onclick="callTrig('/episode/stop','STOP')">■ STOP</button>
       <button class="b-clear" id="bClear" onclick="callTrig('/episode/clear_fault','CLEAR')">⟳ CLEAR FAULT</button>
+      <button class="b-replay" id="bReplay" onclick="callTrig('/episode/replay','REPLAY')">⟳▶ REPLAY SAMPLE (home → run → playback)</button>
       <button class="b-estop" id="bEstop" onclick="toggleEstop()">⛔ E-STOP (off)</button>
     </div>
   </div>
@@ -73,14 +99,55 @@
 
 <script>
 let ros=null, statusSub=null, estopPub=null, estopOn=false;
+let currentSide="right";
+// Same-origin via nginx (this page's :8080): /video -> web_video, /ws -> rosbridge,
+// /switch -> switcher. Same-origin avoids Chrome ORB blocking the cross-origin MJPEG.
+function streamUrl(topic){
+  return `/video/stream?topic=${encodeURIComponent(topic)}&type=mjpeg&quality=40&width=480&height=300&t=${Date.now()}`;
+}
+// on a stream error (slow/transient over tailscale), retry after a moment instead of
+// going permanently blank.
+function camErr(img){
+  const t=img.dataset.topic; if(!t) return;
+  setTimeout(()=>{ img.src=streamUrl(t); }, 2500);
+}
+function refreshCams(side){
+  const f=document.getElementById('frontCam'), w=document.getElementById('wristCam');
+  f.dataset.topic=`/system_${side}/zivid_rgb`; f.src=streamUrl(f.dataset.topic);
+  w.dataset.topic=`/system_${side}/d405_rgb`; w.src=streamUrl(w.dataset.topic);
+}
+// switchBackend=true (toggle click) also swaps the model + vision node + arm side via the
+// side-switcher service; false (page load) only changes the view.
+async function setSide(side, switchBackend){
+  currentSide=side;
+  document.getElementById('sideLeft').classList.toggle('active', side==='left');
+  document.getElementById('sideRight').classList.toggle('active', side==='right');
+  document.getElementById('sideTxt').textContent=side;
+  document.getElementById('frontTopic').textContent=`/system_${side}/zivid_rgb`;
+  document.getElementById('wristTopic').textContent=`/system_${side}/d405_rgb`;
+  refreshCams(side);
+  if(!switchBackend) return;
+  try{
+    log(`switching pipeline to ${side} (model + vision + arm) ...`);
+    const r=await fetch(`/switch/side/${side}`,{method:'POST'});
+    const j=await r.json();
+    log(`switcher: model=${j.model||j.detail}, vision=${j.vision||''}`);
+    setTimeout(()=>{ refreshCams(side); log(`${side} cameras should be live now`); }, 9000);
+  }catch(e){ log(`side-switcher (/switch) unreachable — is it running on :8070? ${e}`); }
+}
 const HEALTH_KEYS=[["front_cam","front cam"],["wrist_cam","wrist cam"],["state","state"],["server","server"],["ft","FT"]];
 
 function log(m){const el=document.getElementById('log');
   el.textContent += (new Date().toLocaleTimeString()+"  "+m+"\n"); el.scrollTop=el.scrollHeight;}
 
 function connect(){
+  if(window.__roslibFailed || typeof ROSLIB==='undefined'){
+    setConn(false); log('ERROR: roslib.min.js failed to load (is it served next to index.html?)');
+    return;
+  }
   const url=document.getElementById('url').value.trim();
   if(ros){try{ros.close()}catch(e){}}
+  log('connecting '+url+' ...');
   ros=new ROSLIB.Ros({url});
   ros.on('connection',()=>{setConn(true);log('connected '+url); subscribe();});
   ros.on('error',(e)=>{setConn(false);log('error: '+(e&&e.message||e));});
@@ -134,10 +201,18 @@ function applyState(s){
   setEnabled('bStop',  st==='RUNNING');
   setEnabled('bHome',  st!=='FAULT' && st!=='HOMING');
   setEnabled('bClear', st==='FAULT');
+  setEnabled('bReplay', st!=='RUNNING' && st!=='FAULT' && st!=='HOMING');
 }
 function fmt(x){return (typeof x==='number')?x.toFixed(1):'—';}
 function setEnabled(id,on){document.getElementById(id).disabled=!on;}
 
+// default the rosbridge URL to the host serving this page (works for remote access too)
+(function(){
+  const scheme = (location.protocol === "https:") ? "wss" : "ws";
+  document.getElementById('url').value = `${scheme}://${location.host}/ws`;   // rosbridge via proxy
+  document.getElementById('videoHost').textContent = `${location.host}/video`;
+})();
+setSide(currentSide, false);   // show current side's cameras (view only; no backend swap on load)
 // auto-connect on load
 connect();
 </script>

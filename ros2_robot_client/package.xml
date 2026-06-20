@@ -12,6 +12,7 @@
   <exec_depend>std_msgs</exec_depend>
   <exec_depend>std_srvs</exec_depend>
   <exec_depend>cv_bridge</exec_depend>
+  <exec_depend>python3-opencv</exec_depend>
   <exec_depend>control_msgs</exec_depend>
   <!-- only for state_source:=frame_aligned -->
   <exec_depend>system_interface</exec_depend>

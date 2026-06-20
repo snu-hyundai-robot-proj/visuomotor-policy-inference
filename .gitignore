@@ -24,6 +24,7 @@ ENV/
 .coverage
 .coverage.*
 htmlcov/
+.ipynb_checkpoints/
 
 # Logs
 *.log
@@ -35,6 +36,11 @@ log/
 *.colcon
 COLCON_IGNORE
 
+# rosbags / recordings
+*.bag
+*.db3
+rosbag2_*/
+
 # Docker: local machine-specific override (bind mounts, host paths) — keep it local.
 # The committed full stack is docker-compose.full.yml.
 docker-compose.override.yml
@@ -43,6 +49,16 @@ docker-compose.override.yml
 bench_*.json
 *.out
 
+# Robot / vision runtime outputs (captured at run time, never source)
+*.mp4
+*.avi
+*.pcd
+*.ply
+*.npy
+*.npz
+*_mask.bin
+*_segmentation_result.png
+
 # Model weights / HF cache (downloaded at runtime — never commit these)
 .cache/
 hf-cache/
@@ -50,11 +66,20 @@ hf-cache/
 *.ckpt
 *.pt
 *.pth
+*.onnx
+
+# Archives / backups (e.g. the USB snapshots — keep them off the repo)
+*.tar.gz
+*.tgz
+*.zip
 
 # Secrets / local env
 .env
 .env.*
 !.env.example
+
+# JS deps (frontend pulls roslib via a vendored file, not a package install)
+node_modules/
 
 # IDE / editors
 .idea/
@@ -66,3 +91,7 @@ hf-cache/
 # OS junk
 .DS_Store
 Thumbs.db
+
+# NOTE: examples/sample_episodes/ (~94 MB of recorded frames) is committed on purpose
+# as demo/replay data. If the repo gets too heavy, move it to Git LFS or drop it here:
+# examples/sample_episodes/

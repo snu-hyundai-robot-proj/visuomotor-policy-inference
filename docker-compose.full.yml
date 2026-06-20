@@ -18,10 +18,10 @@ services:
     ports:
       - "8000:8000"
     environment:
-      - VPI_MODEL_ID=Ngseo/hyundai-uiwang-left-flowmatch
+      - VPI_MODEL_ID=${VPI_MODEL_ID:-Ngseo/hyundai-uiwang-left-flowmatch}
       - VPI_DEVICE=cuda
       - HF_HOME=/hf
-      - HF_HUB_OFFLINE=1            # model is cached; don't hit the Hub at startup
+      - HF_HUB_OFFLINE=${HF_HUB_OFFLINE:-0}   # 0: allow fetching newer revision files (repo got new files)
     volumes:
       - /home/bi/.cache/huggingface:/hf
     healthcheck:
@@ -43,10 +43,10 @@ services:
   frontend:
     image: nginx:alpine
     container_name: vpi-frontend
-    ports:
-      - "8080:80"
+    network_mode: host        # nginx :8080 proxies to localhost 8090/9090/8070 (same-origin)
     volumes:
       - ./frontend:/usr/share/nginx/html:ro
+      - ./frontend/nginx.conf:/etc/nginx/conf.d/default.conf:ro
     restart: unless-stopped
 
   # --- web <-> ROS2 bridge (host net so it shares the host ROS2 graph) ---
@@ -56,9 +56,68 @@ services:
     network_mode: host
     environment:
       - ROS_DOMAIN_ID=${ROS_DOMAIN_ID:-0}
+    volumes:
+      - /dev/shm:/dev/shm:rw        # share ROS2 DDS shared-memory transport with host/teleop nodes
     command: >
       bash -lc "apt-get update &&
                 apt-get install -y --no-install-recommends ros-humble-rosbridge-suite &&
                 source /opt/ros/humble/setup.bash &&
                 ros2 launch rosbridge_server rosbridge_websocket_launch.xml"
     restart: unless-stopped
+
+  # --- Foxglove bridge: view ROS2 camera topics in Foxglove Studio (ws://host:8765) ---
+  foxglove:
+    image: ros:humble-ros-base
+    container_name: vpi-foxglove
+    network_mode: host
+    environment:
+      - ROS_DOMAIN_ID=${ROS_DOMAIN_ID:-0}
+    volumes:
+      - /dev/shm:/dev/shm:rw        # share ROS2 DDS shared-memory transport
+    command: >
+      bash -lc "apt-get update &&
+                apt-get install -y --no-install-recommends ros-humble-foxglove-bridge &&
+                source /opt/ros/humble/setup.bash &&
+                ros2 launch foxglove_bridge foxglove_bridge_launch.xml port:=8765 address:=0.0.0.0"
+    restart: unless-stopped
+
+  # --- MJPEG streams of the camera topics for the web console (port 8090) ---
+  # The frontend's <img> tags pull http://<host>:8090/stream?topic=/system_<side>/...
+  # Raw Image over rosbridge is too heavy (Zivid ~7MB/frame); web_video_server
+  # transcodes to size/quality-capped MJPEG.
+  web_video:
+    image: ros:humble-ros-base
+    container_name: vpi-web-video
+    network_mode: host
+    environment:
+      - ROS_DOMAIN_ID=${ROS_DOMAIN_ID:-0}
+    volumes:
+      - /dev/shm:/dev/shm:rw
+    command: >
+      bash -lc "apt-get update &&
+                apt-get install -y --no-install-recommends ros-humble-web-video-server &&
+                source /opt/ros/humble/setup.bash &&
+                ros2 run web_video_server web_video_server --ros-args -p port:=8090 -p address:=0.0.0.0"
+    restart: unless-stopped
+
+  # --- live camera -> inference sanity test (profile-gated; one-shot) ---
+  # Subscribes to the system_Teleop vision topics (RealSense wrist + Zivid front),
+  # sends them to /predict, prints the 26-d action. Reuses the ros2-teleop image
+  # (has rclpy/numpy/requests/PIL) and the host ROS2 graph (domain 0).
+  #   run:  docker compose -f docker-compose.full.yml --profile test up camera_infer_test
+  camera_infer_test:
+    image: ros2-teleop:latest
+    container_name: vpi-camera-infer-test
+    network_mode: host
+    environment:
+      - ROS_DOMAIN_ID=${ROS_DOMAIN_ID:-0}
+      - PYTHONUNBUFFERED=1
+      - SIDE=${SIDE:-right}          # left|right -> derives /system_<SIDE>/{zivid_rgb,d405_rgb}
+      - VPI_URL=${VPI_URL:-http://localhost:8000}
+      - N_SAMPLES=${N_SAMPLES:-5}
+    volumes:
+      - ./examples:/vpi_examples:ro
+      - /dev/shm:/dev/shm:rw        # share ROS2 DDS shared-memory transport with the vision node
+    command: bash -lc "source /opt/ros/humble/setup.bash && python3 /vpi_examples/camera_infer_test.py"
+    profiles: ["test"]
+    restart: "no"

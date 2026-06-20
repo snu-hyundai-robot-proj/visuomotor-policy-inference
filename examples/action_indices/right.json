@@ -1,0 +1,17 @@
+{
+ "indices": [
+  0,
+  1,
+  2,
+  3,
+  4,
+  5,
+  6,
+  7,
+  8,
+  9,
+  10,
+  11
+ ],
+ "note": "arm6 + INSPIRE-RH56 6-DOF hand; dropped constant slots [12..25] (full model output is 26)."
+}

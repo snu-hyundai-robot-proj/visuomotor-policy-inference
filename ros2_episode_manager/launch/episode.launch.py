@@ -39,9 +39,15 @@ def generate_launch_description():
             "max_duration_sec": LaunchConfiguration("max_duration_sec"),
             "home_max_delta": LaunchConfiguration("home_max_delta"),
 
-            # init pose (rad) — REPLACE with your real home (e.g. dataset episode-start mean)
-            "arm_home": [0.0, 0.0, 0.0, 0.0, 0.0, 0.0],
-            "hand_home": [0.0] * 20,
+            # init pose (rad) — from the HF model repo's hand_init_pose.json (mean of
+            # episode-start observation.state over all episodes). LEFT shown; for RIGHT use
+            # arm [1.737826,1.765172,-0.192581,0.688188,-1.419986,0.320249] and the Inspire
+            # 6-DOF hand_init (first 6 of [2.89855,2.878596,2.811947,2.807127,2.324232,2.490377]).
+            "arm_home": [-1.734299, 1.679489, -0.113224, -0.657517, -1.625038, -0.202079],
+            "hand_home": [-0.174693, 0.088572, -0.171882, -0.064431, -0.344696, 0.039543,
+                          0.383013, 0.300303, -0.401026, 0.188575, 0.13543, 0.108224,
+                          -0.372288, 0.453359, 0.029937, 0.037518, 0.000573, -0.427912,
+                          0.54842, 0.033721],
 
             # outputs (same topics the policy uses)
             "robot_action_topic": "/robot/joint_target_deg",
@@ -56,6 +62,27 @@ def generate_launch_description():
             # policy node hooks
             "policy_enable_service": "/vpi/set_enable",
             "policy_reset_service": "/vpi_policy_control/reset",
+
+            # replay hooks (frontend REPLAY button -> /episode/replay -> these services)
+            "replay_start_service": "/episode_image_publisher/start",
+            "replay_stop_service": "/episode_image_publisher/stop",
         }],
     )
-    return LaunchDescription(decls + [node])
+
+    # recorded-image replay source (managed: autostart=false; Episode Manager starts/stops it)
+    replay = Node(
+        package="vpi_robot_client",
+        executable="episode_image_publisher",
+        name="episode_image_publisher",
+        output="screen",
+        parameters=[{
+            "side": LaunchConfiguration("side"),
+            "episode_dir": "/home/bi/visuomotor-policy-inference/examples/sample_episodes/left",
+            "front_topic": "/system_left/camera/front/rgb",
+            "wrist_topic": "/system_left/camera/wrist/rgb",
+            "fps": 30.0,
+            "loop": False,
+            "autostart": False,     # wait for the manager (REPLAY button)
+        }],
+    )
+    return LaunchDescription(decls + [node, replay])

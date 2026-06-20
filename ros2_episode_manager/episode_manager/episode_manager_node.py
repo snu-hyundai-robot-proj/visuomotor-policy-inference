@@ -129,6 +129,11 @@ class EpisodeManager(Node):
         gp("policy_enable_service", "/vpi/set_enable")
         gp("policy_reset_service", "/vpi_policy_control/reset")
 
+        # replay (recorded-image playback) hooks
+        gp("use_replay", False)            # if True, every RUNNING also starts image replay
+        gp("replay_start_service", "/episode_image_publisher/start")
+        gp("replay_stop_service", "/episode_image_publisher/stop")
+
         self.side = self.get_parameter("side").value
         self.ctrl_dt = 1.0 / float(self.get_parameter("control_rate").value)
         self.arm_size = int(self.get_parameter("arm_action_size").value)
@@ -174,6 +179,8 @@ class EpisodeManager(Node):
         self._t_stop0 = 0.0
         self._hold_arm: Optional[np.ndarray] = None
         self._hold_grip: Optional[np.ndarray] = None
+        self._pending_replay = False
+        self._replay_active = False
 
         # subs
         self._setup_state_subs()
@@ -199,10 +206,14 @@ class EpisodeManager(Node):
         self.create_service(Trigger, "/episode/start", self._srv_start)
         self.create_service(Trigger, "/episode/stop", self._srv_stop)
         self.create_service(Trigger, "/episode/clear_fault", self._srv_clear)
+        self.create_service(Trigger, "/episode/replay", self._srv_replay)
 
         # policy node clients
         self.enable_cli = self.create_client(SetBool, self.get_parameter("policy_enable_service").value)
         self.reset_cli = self.create_client(Trigger, self.get_parameter("policy_reset_service").value)
+        self.use_replay = bool(self.get_parameter("use_replay").value)
+        self.replay_start_cli = self.create_client(Trigger, self.get_parameter("replay_start_service").value)
+        self.replay_stop_cli = self.create_client(Trigger, self.get_parameter("replay_stop_service").value)
 
         # timers
         self.create_timer(self.ctrl_dt, self._tick)
@@ -324,6 +335,19 @@ class EpisodeManager(Node):
             res.success = False; res.message = f"not RUNNING (state={self.state})"
         return res
 
+    def _srv_replay(self, req, res):
+        # one-button "replay sample on the robot": home if needed, then run with image replay
+        if self.state == FAULT:
+            res.success = False; res.message = "in FAULT; clear first"; return res
+        if self.state == RUNNING:
+            res.success = False; res.message = "already RUNNING"; return res
+        self._pending_replay = True
+        if self.state == READY:
+            self._to_running()
+        else:
+            self._to_homing()
+        res.success = True; res.message = "replay requested (home -> run -> playback)"; return res
+
     def _srv_clear(self, req, res):
         if self.state != FAULT:
             res.success = False; res.message = "not in FAULT"; return res
@@ -342,10 +366,13 @@ class EpisodeManager(Node):
             self.get_logger().warn(f"policy enable service not ready (gate {on})", throttle_duration_sec=5.0)
 
     def _call_reset(self):
-        if self.reset_cli.service_is_ready():
-            self.reset_cli.call_async(Trigger.Request())
+        self._call_trigger(self.reset_cli, "policy reset")
+
+    def _call_trigger(self, cli, label):
+        if cli.service_is_ready():
+            cli.call_async(Trigger.Request())
         else:
-            self.get_logger().warn("policy reset service not ready", throttle_duration_sec=5.0)
+            self.get_logger().warn(f"{label}: service not ready", throttle_duration_sec=5.0)
 
     def _to_homing(self):
         self._set_gate(False)
@@ -367,15 +394,22 @@ class EpisodeManager(Node):
     def _to_running(self):
         self._call_reset()
         self._success = False
+        self._replay_active = self._pending_replay or self.use_replay
+        if self._replay_active:
+            self._call_trigger(self.replay_start_cli, "replay start")   # feed recorded images
+        self._pending_replay = False
         self._set_gate(True)          # policy now drives
         self._t_ep0 = time.monotonic()
         if self.episodes_remaining > 0:
             self.episodes_remaining -= 1
         self.state = RUNNING
-        self.get_logger().info("-> RUNNING")
+        self.get_logger().info(f"-> RUNNING (replay={self._replay_active})")
 
     def _to_stopping(self, reason):
         self._set_gate(False)         # cut policy output first
+        if self._replay_active:
+            self._call_trigger(self.replay_stop_cli, "replay stop")
+            self._replay_active = False
         self.last_termination = reason
         with self._lock:
             self._hold_arm = self._arm_rad.copy() if self._arm_rad is not None else self.arm_home.copy()
@@ -429,7 +463,9 @@ class EpisodeManager(Node):
             return
 
         if self.state == READY:
-            if self.auto_start and self.episodes_remaining != 0 and self._healthy():
+            if self._pending_replay and self._healthy():
+                self._to_running()                       # replay requested -> run now (homed)
+            elif self.auto_start and self.episodes_remaining != 0 and self._healthy():
                 self._to_running()
             return
 

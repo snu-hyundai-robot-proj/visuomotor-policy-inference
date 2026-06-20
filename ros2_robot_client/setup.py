@@ -21,6 +21,7 @@ setup(
     entry_points={
         "console_scripts": [
             "policy_control = vpi_robot_client.policy_control_node:main",
+            "episode_image_publisher = vpi_robot_client.episode_image_publisher:main",
         ],
     },
 )
