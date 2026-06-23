@@ -1,0 +1,131 @@
+# Teleop system + per-side bring-up.
+#
+#   docker compose up -d ros2-teleop                 # base container only (general shell)
+#   docker compose --profile left  up -d --build     # LEFT : vision + DG5F hand + left model
+#   docker compose --profile right up -d --build     # RIGHT: vision + Inspire hand + right model
+#   docker compose --profile right down              # stop the right side
+#
+# Zivid is exclusive — run only ONE side at a time (the profiles enforce this).
+# The arm (HDR35) is on the network (192.168.4.151/.152), nothing to start here.
+
+# ---- shared config for nodes that run inside the teleop image ----
+x-teleop-runner: &teleop-runner
+  image: ros2-teleop:latest
+  network_mode: host
+  privileged: true
+  gpus: all
+  environment:
+    - ROS_DOMAIN_ID=0
+    - NVIDIA_VISIBLE_DEVICES=all
+    - NVIDIA_DRIVER_CAPABILITIES=all
+  volumes:
+    - .:/workspace
+    - teleop_build:/workspace/build
+    - teleop_install:/workspace/install
+    - teleop_log:/workspace/log
+    - /tmp/.X11-unix:/tmp/.X11-unix:rw
+    - /dev/bus/usb:/dev/bus/usb:rw
+    - /dev:/dev
+    - /dev/shm:/dev/shm:rw
+  restart: unless-stopped
+
+# ---- shared config for the policy inference server (our prebuilt image) ----
+x-inference: &inference
+  image: visuomotor-policy-inference:latest
+  network_mode: host
+  gpus: all
+  volumes:
+    - /home/bi/.cache/huggingface:/hf
+  restart: unless-stopped
+
+services:
+  # ===== base container (always on; our exec-based scripts target this) =====
+  ros2-teleop:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: ros2_teleop_system
+    image: ros2-teleop:latest
+    network_mode: host
+    environment:
+      - DISPLAY=${DISPLAY}
+      - QT_X11_NO_MITSHM=1
+      - ROS_DOMAIN_ID=0
+      - NVIDIA_VISIBLE_DEVICES=all
+      - NVIDIA_DRIVER_CAPABILITIES=all
+    volumes:
+      - .:/workspace
+      - teleop_build:/workspace/build
+      - teleop_install:/workspace/install
+      - teleop_log:/workspace/log
+      - /tmp/.X11-unix:/tmp/.X11-unix:rw
+      - /dev/bus/usb:/dev/bus/usb:rw
+      - /dev:/dev
+      - /dev/shm:/dev/shm:rw
+    devices:
+      - /dev/dri
+    gpus: all
+    privileged: true
+    stdin_open: true
+    tty: true
+    command: /bin/bash
+    restart: unless-stopped
+
+  # ===== LEFT side (profile: left) =====
+  vision-left:
+    <<: *teleop-runner
+    container_name: teleop_vision_left
+    profiles: ["left"]
+    # VISION_SKIP_SEG=1: skip the RF-DETR segmentation model (only RGB streams needed for the
+    #   policy; much faster startup). VISION_RS_ANY=1: fall back to any connected RealSense if
+    #   the side's exact serial isn't present. Remove these to restore full vision/object-pose.
+    command: bash -lc "export VISION_SKIP_SEG=1 VISION_RS_ANY=1; source /opt/ros/humble/setup.bash; source /workspace/install/setup.bash; exec ros2 run teleop_vision system_vision_left"
+
+  hand-left:
+    <<: *teleop-runner
+    container_name: teleop_hand_left
+    profiles: ["left"]
+    command: bash -lc "source /opt/ros/humble/setup.bash; source /workspace/install/setup.bash; exec ros2 launch dg5f_driver dg5f_left_pid_all_controller.launch.py delto_ip:=${DELTO_IP:-192.168.4.73} fingertip_sensor:=true"
+
+  inference-left:
+    <<: *inference
+    container_name: vpi_inference
+    profiles: ["left"]
+    environment:
+      - VPI_MODEL_ID=Ngseo/hyundai-uiwang-left-flowmatch
+      - VPI_DEVICE=cuda
+      - HF_HOME=/hf
+      - HF_HUB_OFFLINE=0
+
+  # ===== RIGHT side (profile: right) =====
+  vision-right:
+    <<: *teleop-runner
+    container_name: teleop_vision_right
+    profiles: ["right"]
+    # see vision-left note. VISION_RS_ANY currently needed: right RealSense (409122273122) is
+    # not connected, so it falls back to the available unit.
+    command: bash -lc "export VISION_SKIP_SEG=1 VISION_RS_ANY=1; source /opt/ros/humble/setup.bash; source /workspace/install/setup.bash; exec ros2 run teleop_vision system_vision_right"
+
+  hand-right:
+    <<: *teleop-runner
+    container_name: teleop_hand_right
+    profiles: ["right"]
+    # INSPIRE_PORT: bind by the FTDI serial (stable) instead of /dev/ttyUSBn — a USB
+    # re-enumeration (e.g. after a robot power-cycle) changes the ttyUSB number. Override
+    # via the INSPIRE_PORT env if the hand is ever swapped for a different unit.
+    command: bash -lc "export INSPIRE_PORT=${INSPIRE_PORT:-/dev/serial/by-id/usb-FTDI_FT232R_USB_UART_BG024HL9-if00-port0}; source /opt/ros/humble/setup.bash; source /workspace/install/setup.bash; exec ros2 run inspire_driver inspire_driver_node"
+
+  inference-right:
+    <<: *inference
+    container_name: vpi_inference
+    profiles: ["right"]
+    environment:
+      - VPI_MODEL_ID=Ngseo/hyundai-uiwang-right-flowmatch
+      - VPI_DEVICE=cuda
+      - HF_HOME=/hf
+      - HF_HUB_OFFLINE=0
+
+volumes:
+  teleop_build:
+  teleop_install:
+  teleop_log:

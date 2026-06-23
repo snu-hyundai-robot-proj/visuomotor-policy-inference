@@ -1,0 +1,8 @@
+# Request
+string side
+float64[6] robot_pose
+int32 command
+---
+# Response
+bool accepted
+int32 code

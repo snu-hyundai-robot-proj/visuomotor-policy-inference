@@ -73,9 +73,20 @@ hf-cache/
 *.tgz
 *.zip
 
+# Crash dumps (the C++ HDR/teleop drivers can core-dump) + process pids
+core
+core.*
+*.pid
+
+# Patch / merge artifacts + editor backups
+*.orig
+*.rej
+*.bak
+
 # Secrets / local env
 .env
 .env.*
+.envrc
 !.env.example
 
 # JS deps (frontend pulls roslib via a vendored file, not a package install)
@@ -91,6 +102,22 @@ node_modules/
 # OS junk
 .DS_Store
 Thumbs.db
+
+# Vendored teleop workspace (system_Teleop/) — heavy assets are NOT committed; see
+# system_Teleop/EXTERNAL_ASSETS.md for what they are and where to get them. (Model weights,
+# colcon build/, install/, log/, __pycache__ are already covered by the patterns above.)
+system_Teleop/Record/
+system_Teleop/Record.zip
+system_Teleop/**/outputs/
+system_Teleop/**/.git/
+# Keep small vendored SDK libs under system_Teleop (the global *.so rule would ignore them) —
+# e.g. libdelto_gripper_helper.so (40 KB, needed for the DG5F hand).
+!system_Teleop/**/*.so
+# ...EXCEPT the Manus SDK libs, which exceed GitHub's 100 MB/file limit. Re-fetch them from the
+# Manus SDK install (see EXTERNAL_ASSETS.md). They are not used by the inference pipeline.
+system_Teleop/src/Delto_/dg5f_driver/include/libManusSDK.so
+system_Teleop/src/Manus_/ManusSDK/lib/libManusSDK.so
+system_Teleop/src/Manus_/ManusSDK/lib/libManusSDK_Integrated.so
 
 # NOTE: examples/sample_episodes/ (~94 MB of recorded frames) is committed on purpose
 # as demo/replay data. If the repo gets too heavy, move it to Git LFS or drop it here:

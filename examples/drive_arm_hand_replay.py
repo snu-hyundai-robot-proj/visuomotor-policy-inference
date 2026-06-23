@@ -120,12 +120,16 @@ def sync_ramp(arm, a0, a_tgt, hand, h0, h_tgt, arm_dps, hand_rps):
     (the faster one is slowed to stay in sync). Returns the final (arm_cmd, hand_cmd)."""
     a0 = np.asarray(a0, float); a_tgt = np.asarray(a_tgt, float)
     h0 = np.asarray(h0, float); h_tgt = np.asarray(h_tgt, float)
-    an = int(np.ceil(np.abs(a_tgt - a0).max() / max(arm_dps * SEND_DT, 1e-9)))
-    hn = int(np.ceil(np.abs(h_tgt - h0).max() / max(hand_rps * SEND_DT, 1e-9)))
-    n = max(an, hn, 1)
+    an = np.abs(a_tgt - a0).max() / max(arm_dps * SEND_DT, 1e-9)
+    hn = np.abs(h_tgt - h0).max() / max(hand_rps * SEND_DT, 1e-9)
+    # smoothstep velocity profile: eases IN from 0 and OUT to 0 instead of jumping straight to
+    # cruise speed — required for an acceleration-limited robot so the FIRST move starts slowly.
+    # Peak velocity is 1.5x the average, so use 1.5x the steps to keep the peak under the cap.
+    n = max(int(np.ceil(1.5 * max(an, hn))), 1)
     ac, hc = a0.copy(), h0.copy()
     for i in range(1, n + 1):
-        f = i / n
+        t = i / n
+        f = t * t * (3.0 - 2.0 * t)          # smoothstep: zero velocity at both ends
         ac = a0 + (a_tgt - a0) * f
         hc = h0 + (h_tgt - h0) * f
         arm.insert(ac); hand.publish(hc)
@@ -159,7 +163,8 @@ class ArmClient:
         self.handshake_ok = threading.Event(); self.latest_q = None; self._tfs = 0.0
         self.disp.on_type["handshake_ack"] = lambda m: self.handshake_ok.set() if m.get("ok") else None
         self.disp.on_type["data"] = self._on_data
-        self.disp.on_error = lambda e: print(f"[robot err] {e}")
+        self.disp.on_error = lambda e: print(f"[ARM ERR] code={e.get('error')} "
+                                             f"msg={e.get('message')} hint={e.get('hint')}")
 
     def _on_data(self, m):
         r = m.get("result")

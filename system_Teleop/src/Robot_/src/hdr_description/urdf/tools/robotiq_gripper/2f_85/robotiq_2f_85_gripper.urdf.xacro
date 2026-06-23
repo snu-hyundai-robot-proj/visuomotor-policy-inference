@@ -1,0 +1,12 @@
+<?xml version="1.0"?>
+<robot xmlns:xacro="http://wiki.ros.org/xacro" name="robotiq_gripper">
+    <xacro:arg name="use_mock_hardware" default="true" />
+    <xacro:arg name="com_port" default="/dev/ttyUSB0" />
+
+    <xacro:include filename="$(find hdr_description)/urdf/tools/robotiq_gripper/2f_85/robotiq_2f_85_macro.urdf.xacro" />
+
+    <link name="world" />
+    <xacro:robotiq_gripper name="RobotiqGripperHardwareInterface" prefix="" parent="world" use_mock_hardware="$(arg use_mock_hardware)" com_port="$(arg com_port)">
+        <origin xyz="0 0 0" rpy="0 0 0" />
+    </xacro:robotiq_gripper>
+</robot>

@@ -40,7 +40,11 @@ docker cp "$REPO/examples/drive_arm_hand_replay.py" "$CONTAINER:/tmp/drive_arm_h
 docker exec "$CONTAINER" bash -lc "ls /tmp/sample_episodes/$SIDE/episode.json >/dev/null 2>&1" \
   || docker cp "$REPO/examples/sample_episodes" "$CONTAINER:/tmp/sample_episodes" >/dev/null
 
-# 3) run the replay
+# 3) run the replay.
+#    Ctrl-C on the host does not reliably reach the python inside `docker exec`; this trap
+#    forwards the interrupt so the script stops cleanly (arm.stop) instead of finishing the run.
+trap 'echo; echo "[stop] interrupting replay ..."; docker exec "$CONTAINER" pkill -INT -f drive_arm_hand_replay 2>/dev/null; sleep 1' INT TERM
+
 docker exec "$CONTAINER" bash -lc \
   "source /opt/ros/humble/setup.bash; export ROS_DOMAIN_ID=0; cd /tmp; \
-   python3 drive_arm_hand_replay.py --side $SIDE --source $SRC --steps $STEPS $ENGAGE $PASS"
+   python3 -u drive_arm_hand_replay.py --side $SIDE --source $SRC --steps $STEPS $ENGAGE $PASS"

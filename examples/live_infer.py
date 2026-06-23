@@ -88,7 +88,8 @@ class ArmReader:
         self.ok = threading.Event(); self.q_deg = None
         self.disp.on_type["handshake_ack"] = lambda m: self.ok.set() if m.get("ok") else None
         self.disp.on_type["data"] = self._d
-        self.disp.on_error = lambda e: None
+        self.disp.on_error = lambda e: print(f"[ARM ERR] code={e.get('error')} "
+                                             f"msg={e.get('message')} hint={e.get('hint')}")
 
     def _d(self, m):
         r = m.get("result")

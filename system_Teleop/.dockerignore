@@ -1,0 +1,48 @@
+# Docker build context should contain source needed for colcon build only.
+# Runtime data/models remain available when docker-compose mounts .:/workspace.
+
+# Workspace build artifacts
+build/
+install/
+log/
+log.txt
+
+# Nested workspace artifacts
+**/build/
+**/install/
+**/log/
+**/__pycache__/
+**/*.pyc
+
+# Recorded data and generated outputs
+Record/
+Record.zip
+**/Record/
+**/outputs/
+**/*.bag
+**/*.db3
+**/*.mcap
+**/*.mp4
+**/*.avi
+**/*.bin
+
+# Large model/checkpoint files; install or mount them at runtime.
+**/*.pt
+**/*.pth
+**/*.onnx
+**/*.ckpt
+**/*.safetensors
+
+# VCS and local metadata
+**/.git/
+**/.github/
+.vscode/
+.idea/
+
+# Archives and local scratch files
+**/*.zip
+**/*.tar
+**/*.tar.gz
+**/*.tgz
+**/*.7z
+**/*.rar

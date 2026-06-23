@@ -64,6 +64,25 @@ HAND = {
 
 def step_toward(c, d, m): c = np.asarray(c); return c + np.clip(np.asarray(d) - c, -m, m)
 
+# Inspire (RIGHT): init is in RADIANS; /inspire/right/target wants a normalized ~[0,1] vector
+# (retarget_fingers -> actuator), and joint_states are received_angle (deg-ish).
+INSPIRE_K = 1800.0 / math.pi
+
+
+def inspire_rad_to_norm(rad6):
+    out = []
+    for i, r in enumerate(rad6):
+        a = float(r) * INSPIRE_K
+        if i < 4:    x = (a - 750.0) / 1100.0
+        elif i == 4: x = (a - 1100.0) / 400.0
+        else:        x = (1900.0 - a) / 950.0
+        out.append(x)
+    return out
+
+
+def inspire_angle_to_rad(ang6):
+    return [float(a) * math.pi / 180.0 for a in ang6]
+
 
 class ArmClient:
     def __init__(self, ip):
@@ -71,7 +90,9 @@ class ArmClient:
         self.parser = NDJSONParser(); self.disp = Dispatcher()
         self.ok = threading.Event(); self.q = None; self._tfs = 0.0
         self.disp.on_type["handshake_ack"] = lambda m: self.ok.set() if m.get("ok") else None
-        self.disp.on_type["data"] = self._d; self.disp.on_error = lambda e: None
+        self.disp.on_type["data"] = self._d
+        self.disp.on_error = lambda e: print(f"[ARM ERR] code={e.get('error')} "
+                                             f"msg={e.get('message')} hint={e.get('hint')}")
 
     def _d(self, m):
         r = m.get("result")
@@ -109,8 +130,13 @@ class HandIO(Node):
         super().__init__("home_to_init"); self.spec = spec; self.cur = None
         cls = MultiDOFCommand if spec["type"] == "delto" else Float64MultiArray
         self.pub = self.create_publisher(cls, spec["ref"], 1)
-        self.create_subscription(JointState, spec["state"],
-                                 lambda m: setattr(self, "cur", np.asarray(m.position)[: spec["ndof"]]), JS_QOS)
+        js_qos = JS_QOS if spec["type"] == "delto" else 1   # dg5f is latched; inspire streams (default QoS)
+        self.create_subscription(JointState, spec["state"], self._on_js, js_qos)
+
+    def _on_js(self, m):
+        raw = np.asarray(m.position)[: self.spec["ndof"]]
+        # inspire joint_states are received_angle (deg-ish) -> rad to match the init units
+        self.cur = np.asarray(inspire_angle_to_rad(raw)) if self.spec["type"] == "inspire" else raw
 
     def wait(self, t=6.0):
         t0 = time.time()
@@ -123,7 +149,7 @@ class HandIO(Node):
             m = MultiDOFCommand(); m.dof_names = LEFT_DELTO_JOINT_NAMES[: len(v)]
             m.values = [float(x) for x in v]; m.values_dot = [0.0] * len(v)
         else:
-            m = Float64MultiArray(data=[float(x) for x in v])
+            m = Float64MultiArray(data=[float(x) for x in inspire_rad_to_norm(v)])
         self.pub.publish(m)
 
 

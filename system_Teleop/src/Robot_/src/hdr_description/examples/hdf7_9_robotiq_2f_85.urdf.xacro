@@ -1,0 +1,137 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<robot xmlns:xacro="http://wiki.ros.org/xacro" name="$(arg name)">
+  <xacro:arg name="name" default="hdf7_9_robotiq"/>
+  <xacro:arg name="use_sim" default="false"/>
+  <xacro:arg name="use_mock_hardware" default="true"/>
+  <xacro:arg name="initial_positions_file" default=""/>
+  <xacro:arg name="gripper_prefix" default=""/>
+  <xacro:arg name="controllers_file" default=""/>
+
+  <xacro:include filename="$(find hdr_description)/urdf/robots/hdf7_9/hdf7_9.urdf.xacro"/>
+
+  <xacro:include filename="$(find hdr_description)/urdf/tools/robotiq_gripper/hdr_to_robotiq_adapter.urdf.xacro"/>
+  <xacro:include filename="$(find hdr_description)/urdf/tools/robotiq_gripper/2f_85/robotiq_2f_85_macro.urdf.xacro"/>
+
+  <xacro:hdr_to_robotiq
+    prefix="$(arg gripper_prefix)"
+    parent="tool0"
+    child="$(arg gripper_prefix)gripper_mount_link"
+    rotation="0.0"/>
+
+  <xacro:robotiq_gripper
+    name="RobotiqGripperHardwareInterface"
+    prefix="$(arg gripper_prefix)"
+    parent="$(arg gripper_prefix)gripper_mount_link"
+    use_sim="$(arg use_sim)"
+    use_mock_hardware="$(arg use_mock_hardware)"
+    include_ros2_control="false">
+    <origin xyz="0 0 0" rpy="0 0 0"/>
+  </xacro:robotiq_gripper>
+
+  <xacro:property name="initial_positions_file" value="$(arg initial_positions_file)"/>
+  <xacro:property name="initial_positions" value="${xacro.load_yaml(initial_positions_file)['initial_positions'] if initial_positions_file != '' else dict(j1=0.0,j2=1.5707,j3=0.0,j4=0.0,j5=0.0,j6=0.0)}"/>
+  <xacro:property name="sim" value="$(arg use_sim)"/>
+  <xacro:property name="mock" value="$(arg use_mock_hardware)"/>
+
+  <ros2_control name="$(arg name)" type="system">
+    <hardware>
+      <xacro:if value="${sim}">
+        <plugin>gz_ros2_control/GazeboSimSystem</plugin>
+      </xacro:if>
+      <xacro:if value="${mock}">
+        <plugin>mock_components/GenericSystem</plugin>
+      </xacro:if>
+      <xacro:unless value="${sim or mock}">
+        <plugin>hdr_hardware_interface/HDRRobotHardware</plugin>
+        <param name="robot_model">hdf7_9</param>
+      </xacro:unless>
+    </hardware>
+
+    <joint name="j1">
+      <command_interface name="position"/>
+      <state_interface name="position">
+        <param name="initial_value">${initial_positions['j1']}</param>
+      </state_interface>
+      <state_interface name="velocity"/>
+      <state_interface name="effort"/>
+    </joint>
+    <joint name="j2">
+      <command_interface name="position"/>
+      <state_interface name="position">
+        <param name="initial_value">${initial_positions['j2']}</param>
+      </state_interface>
+      <state_interface name="velocity"/>
+      <state_interface name="effort"/>
+    </joint>
+    <joint name="j3">
+      <command_interface name="position"/>
+      <state_interface name="position">
+        <param name="initial_value">${initial_positions['j3']}</param>
+      </state_interface>
+      <state_interface name="velocity"/>
+      <state_interface name="effort"/>
+    </joint>
+    <joint name="j4">
+      <command_interface name="position"/>
+      <state_interface name="position">
+        <param name="initial_value">${initial_positions['j4']}</param>
+      </state_interface>
+      <state_interface name="velocity"/>
+      <state_interface name="effort"/>
+    </joint>
+    <joint name="j5">
+      <command_interface name="position"/>
+      <state_interface name="position">
+        <param name="initial_value">${initial_positions['j5']}</param>
+      </state_interface>
+      <state_interface name="velocity"/>
+      <state_interface name="effort"/>
+    </joint>
+    <joint name="j6">
+      <command_interface name="position"/>
+      <state_interface name="position">
+        <param name="initial_value">${initial_positions['j6']}</param>
+      </state_interface>
+      <state_interface name="velocity"/>
+      <state_interface name="effort"/>
+    </joint>
+
+    <joint name="$(arg gripper_prefix)robotiq_85_left_knuckle_joint">
+      <command_interface name="position"/>
+      <state_interface name="position">
+        <param name="initial_value">0.0</param>
+      </state_interface>
+      <state_interface name="velocity"/>
+    </joint>
+
+    <joint name="$(arg gripper_prefix)robotiq_85_right_knuckle_joint">
+      <state_interface name="position"/>
+      <state_interface name="velocity"/>
+    </joint>
+    <joint name="$(arg gripper_prefix)robotiq_85_left_inner_knuckle_joint">
+      <state_interface name="position"/>
+      <state_interface name="velocity"/>
+    </joint>
+    <joint name="$(arg gripper_prefix)robotiq_85_right_inner_knuckle_joint">
+      <state_interface name="position"/>
+      <state_interface name="velocity"/>
+    </joint>
+    <joint name="$(arg gripper_prefix)robotiq_85_left_finger_tip_joint">
+      <state_interface name="position"/>
+      <state_interface name="velocity"/>
+    </joint>
+    <joint name="$(arg gripper_prefix)robotiq_85_right_finger_tip_joint">
+      <state_interface name="position"/>
+      <state_interface name="velocity"/>
+    </joint>
+  </ros2_control>
+
+  <xacro:if value="$(arg use_sim)">
+    <gazebo>
+      <plugin filename="libgz_ros2_control-system.so" name="gz_ros2_control::GazeboSimROS2ControlPlugin">
+        <parameters>$(arg controllers_file)</parameters>
+        <controller_manager_node_name>controller_manager</controller_manager_node_name>
+      </plugin>
+    </gazebo>
+  </xacro:if>
+</robot>

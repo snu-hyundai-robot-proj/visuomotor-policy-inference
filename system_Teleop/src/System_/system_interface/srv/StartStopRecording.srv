@@ -1,0 +1,7 @@
+bool start
+string side
+string out_path
+int32 fps
+---
+bool ok
+string message

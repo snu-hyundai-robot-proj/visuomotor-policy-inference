@@ -1,0 +1,23 @@
+<?xml version="1.0"?>
+<?xml-model href="http://download.ros.org/schema/package_format3.xsd" schematypens="http://www.w3.org/2001/XMLSchema"?>
+<package format="3">
+  <name>hdr_client_driver</name>
+  <version>1.0.0</version>
+  <description>A modular C++ client library for interfacing with HD Hyundai Robotics' Open API communication.  
+    Supports real-time data exchange, robot task control, file management, and ROS2 integration.</description>
+  <maintainer email="kwon.hyojun@hd.com">hyojun</maintainer>
+  <license>BSD-3-Clause</license>
+
+  <buildtool_depend>cmake</buildtool_depend>
+
+  <exec_depend condition="$ROS_VERSION == 2">ament_cmake</exec_depend>
+
+  <depend>libcurl-dev</depend>
+  <depend>nlohmann-json-dev</depend>
+  <depend>libboost-system-dev</depend>
+  
+  <export>
+    <build_type>cmake</build_type>
+  </export>
+
+</package>

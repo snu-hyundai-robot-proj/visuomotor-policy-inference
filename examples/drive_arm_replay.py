@@ -90,7 +90,8 @@ class ArmClient:
         self.latest_q = None
         self.disp.on_type["handshake_ack"] = lambda m: self.handshake_ok.set() if m.get("ok") else None
         self.disp.on_type["data"] = self._on_data
-        self.disp.on_error = lambda e: print(f"[robot error] {e}")
+        self.disp.on_error = lambda e: print(f"[ARM ERR] code={e.get('error')} "
+                                             f"msg={e.get('message')} hint={e.get('hint')}")
         self._tfs = 0.0
 
     def _on_data(self, m):

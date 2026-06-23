@@ -38,7 +38,12 @@ sudo ip addr add 192.168.4.55/24 dev enp4s0 2>/dev/null || true
 # 2) copy the latest loop script into the container
 docker cp "$REPO/examples/run_robot_loop.py" "$CONTAINER:/tmp/run_robot_loop.py" >/dev/null
 
-# 3) run the closed loop
+# 3) run the closed loop.
+#    Ctrl-C on the host does NOT reliably reach the python inside `docker exec`, so the robot
+#    would keep going until --secs. This trap forwards the interrupt: it sends SIGINT to the
+#    in-container python, which triggers its clean shutdown (arm.stop + hand hold + exit).
+trap 'echo; echo "[stop] interrupting robot loop ..."; docker exec "$CONTAINER" pkill -INT -f run_robot_loop 2>/dev/null; sleep 1' INT TERM
+
 docker exec "$CONTAINER" bash -lc \
   "source /opt/ros/humble/setup.bash; export ROS_DOMAIN_ID=0; cd /tmp; \
-   python3 run_robot_loop.py --side $SIDE $ENGAGE --secs $SECS $PASS"
+   python3 -u run_robot_loop.py --side $SIDE $ENGAGE --secs $SECS $PASS"

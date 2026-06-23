@@ -1,0 +1,15 @@
+<?xml version="1.0"?>
+<robot xmlns:xacro="http://ros.org/wiki/xacro">
+  <!--
+    OnRobot RG2 Gazebo configuration for Gazebo Sim (Humble/Jazzy)
+    Mimic joints are handled natively by gz_ros2_control using URDF <mimic> tags.
+    No external mimic joint plugin required.
+
+    Note: GazeboSimROS2ControlPlugin should be defined ONCE in the main robot xacro,
+    not here. This macro is kept for material/friction properties if needed.
+  -->
+  <xacro:macro name="onrobot_rg2_gazebo" params="prefix">
+    <!-- Gripper-specific Gazebo properties can be added here if needed -->
+    <!-- The GazeboSimROS2ControlPlugin is defined in the main robot xacro -->
+  </xacro:macro>
+</robot>

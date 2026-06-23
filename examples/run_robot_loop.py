@@ -110,12 +110,16 @@ def sync_ramp(arm, a0, a_tgt, publish, h0, h_tgt, arm_dps, hand_rps, do_hand):
     neither leads. n = larger step count at each one's own speed cap. Returns (arm_cmd, hand_cmd)."""
     a0 = np.asarray(a0, float); a_tgt = np.asarray(a_tgt, float)
     h0 = np.asarray(h0, float); h_tgt = np.asarray(h_tgt, float)
-    an = int(np.ceil(np.abs(a_tgt - a0).max() / max(arm_dps * SEND_DT, 1e-9))) if arm is not None else 0
-    hn = int(np.ceil(np.abs(h_tgt - h0).max() / max(hand_rps * SEND_DT, 1e-9))) if do_hand else 0
-    n = max(an, hn, 1)
+    an = np.abs(a_tgt - a0).max() / max(arm_dps * SEND_DT, 1e-9) if arm is not None else 0.0
+    hn = np.abs(h_tgt - h0).max() / max(hand_rps * SEND_DT, 1e-9) if do_hand else 0.0
+    # smoothstep velocity profile: eases IN from 0 / OUT to 0 instead of jumping to cruise speed
+    # — required for an acceleration-limited robot so the FIRST move starts slowly. Peak velocity
+    # is 1.5x the average, so use 1.5x the steps to keep the peak under the cap.
+    n = max(int(np.ceil(1.5 * max(an, hn))), 1)
     ac, hc = a0.copy(), h0.copy()
     for i in range(1, n + 1):
-        f = i / n
+        t = i / n
+        f = t * t * (3.0 - 2.0 * t)          # smoothstep: zero velocity at both ends
         ac = a0 + (a_tgt - a0) * f
         hc = h0 + (h_tgt - h0) * f
         if arm is not None: arm.insert(ac)
@@ -161,7 +165,9 @@ class ArmClient:
         self.parser = NDJSONParser(); self.disp = Dispatcher()
         self.ok = threading.Event(); self.q = None; self._tfs = 0.0
         self.disp.on_type["handshake_ack"] = lambda m: self.ok.set() if m.get("ok") else None
-        self.disp.on_type["data"] = self._d; self.disp.on_error = lambda e: None
+        self.disp.on_type["data"] = self._d
+        self.disp.on_error = lambda e: print(f"[ARM ERR] code={e.get('error')} "
+                                             f"msg={e.get('message')} hint={e.get('hint')}")
 
     def _d(self, m):
         r = m.get("result")
@@ -245,7 +251,8 @@ def main():
                     "use fixed init for the hand-20 state, drive the arm only")
     ap.add_argument("--secs", type=float, default=20.0)
     ap.add_argument("--arm-speed", type=float, default=60.0, help="deg/s per-tick clamp")
-    ap.add_argument("--hand-speed", type=float, default=2.0, help="rad/s per-tick clamp")
+    ap.add_argument("--hand-speed", type=float, default=8.0, help="rad/s per-tick clamp (matches "
+                    "replay so the hand keeps up; synced_step still slows the arm in lockstep if it binds)")
     ap.add_argument("--home-arm-speed", type=float, default=8.0)
     ap.add_argument("--home-hand-speed", type=float, default=0.5)
     ap.add_argument("--substeps", type=int, default=8)

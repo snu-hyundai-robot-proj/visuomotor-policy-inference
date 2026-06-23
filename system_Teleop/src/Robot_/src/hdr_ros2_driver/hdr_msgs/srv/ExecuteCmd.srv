@@ -1,0 +1,5 @@
+string[] cmd_line
+int32 period_ms
+---
+string message
+bool  success
