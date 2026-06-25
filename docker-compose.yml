@@ -8,6 +8,10 @@ services:
     environment:
       - VPI_MODEL_ID=Ngseo/hyundai-uiwang-left-flowmatch
       - VPI_DEVICE=cpu            # set to "cuda" with the GPU block below
+      # Ruckig jerk-limited action smoothing is ON by default. Optional tuning:
+      # - VPI_RUCKIG=0             # disable smoothing (serve raw policy output)
+      # - VPI_RUCKIG_MAX_JERK=300  # rad/s^3, lower = smoother but laggier (default 500)
+      # - VPI_FPS=30               # control rate the smoother assumes (default 30)
       - HF_HOME=/cache/huggingface
       # The model repo is gated (manual approval), so a token with access is required.
       # Put HF_TOKEN in a local .env file (see .env.example) or export it before `up`.

@@ -74,6 +74,16 @@ class LeRobotSystemNode(Node):
         self.declare_parameter("gripper_action_size", 0)
         self.declare_parameter("gripper_command_type", "auto")
 
+        # Ruckig jerk-limited smoothing of the policy action stream (opt-in).
+        # Limits are applied to the full action vector; pass either a single value
+        # (broadcast to every dim) or one value per action dim. Arm defaults below
+        # match the HDR35_20 URDF/cuRobo limits; hand dims fall back to the scalar.
+        self.declare_parameter("enable_ruckig", False)
+        self.declare_parameter("ruckig_max_velocity", [3.141])
+        self.declare_parameter("ruckig_max_acceleration", [12.0])
+        self.declare_parameter("ruckig_max_jerk", [500.0])
+        self.declare_parameter("ruckig_target_velocity_mode", "zero")
+
         self.side = self.get_parameter("side").value
         if self.side not in ("left", "right"):
             raise ValueError("side must be 'left' or 'right'.")
@@ -121,6 +131,8 @@ class LeRobotSystemNode(Node):
             self.gripper_action_start = self.robot_action_start + self.robot_action_size
             self.gripper_action_size = self.expected_action_dim - self.gripper_action_start
 
+        self.smoother = self._build_ruckig_smoother()
+
         self.bridge = CvBridge()
         self.lock = threading.Lock()
         self.latest_state: Optional[FrameAlignedState] = None
@@ -164,6 +176,40 @@ class LeRobotSystemNode(Node):
                 "Policy expects camera observations, but camera_topics is empty. "
                 "The node will wait until matching image topics are configured."
             )
+
+    def _build_ruckig_smoother(self):
+        if not bool(self.get_parameter("enable_ruckig").value):
+            return None
+        fps = float(self.get_parameter("fps").value)
+        if fps <= 0:
+            self.get_logger().error("Ruckig requested but fps<=0; smoothing disabled.")
+            return None
+        vmax = list(self.get_parameter("ruckig_max_velocity").value) or [3.141]
+        amax = list(self.get_parameter("ruckig_max_acceleration").value) or [12.0]
+        jmax = list(self.get_parameter("ruckig_max_jerk").value) or [500.0]
+        mode = self.get_parameter("ruckig_target_velocity_mode").value or "zero"
+        try:
+            from lerobot_system.ruckig_smoother import RuckigSmoother
+
+            smoother = RuckigSmoother(
+                dof=self.expected_action_dim,
+                control_dt=1.0 / fps,
+                max_velocity=vmax,
+                max_acceleration=amax,
+                max_jerk=jmax,
+                target_velocity_mode=mode,
+            )
+            self.get_logger().info(
+                f"Ruckig smoother ENABLED: dof={self.expected_action_dim}, dt={1.0/fps:.4f}s, "
+                f"vmax={vmax}, amax={amax}, jmax={jmax}, mode={mode}"
+            )
+            return smoother
+        except Exception as exc:  # ruckig missing or bad limits -> run without smoothing
+            self.get_logger().error(
+                f"Failed to initialize Ruckig smoother ({exc}); continuing WITHOUT smoothing. "
+                "Install it in the ROS env with `pip install ruckig`."
+            )
+            return None
 
     def _default_gripper_topic(self) -> str:
         if self.side == "left":
@@ -241,13 +287,23 @@ class LeRobotSystemNode(Node):
             self.get_logger().error(f"LeRobot inference failed: {exc}")
             return
 
+        # publish the raw (un-smoothed) policy output for logging/debug
         self.raw_action_pub.publish(Float64MultiArray(data=[float(x) for x in action]))
 
-        robot_action = self._slice_action(action, self.robot_action_start, self.robot_action_size)
+        # apply Ruckig jerk-limited smoothing before sending commands to the robot
+        command = action
+        if self.smoother is not None:
+            try:
+                command = self.smoother.step(action)
+            except Exception as exc:
+                self.get_logger().warn(f"Ruckig smoothing failed ({exc}); sending raw action.")
+                command = action
+
+        robot_action = self._slice_action(command, self.robot_action_start, self.robot_action_size)
         if robot_action is not None:
             self._publish_robot_action(robot_action, state)
 
-        gripper_action = self._slice_action(action, self.gripper_action_start, self.gripper_action_size)
+        gripper_action = self._slice_action(command, self.gripper_action_start, self.gripper_action_size)
         if gripper_action is not None:
             self._publish_gripper_action(gripper_action)
 

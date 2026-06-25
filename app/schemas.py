@@ -29,6 +29,7 @@ class InfoResponse(BaseModel):
     action_dim: int
     scheduler: str
     num_inference_steps: int | None
+    ruckig: dict | None = Field(default=None, description="jerk-limited smoothing config, or null if disabled")
 
 
 class HealthResponse(BaseModel):

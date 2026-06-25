@@ -13,6 +13,8 @@ setup(
         ("share/" + package_name, ["package.xml"]),
         ("share/" + package_name + "/launch", glob("launch/*.launch.py")),
     ],
+    # Runtime deps (lerobot, torch, ruckig, numpy) are pip-installed in the node's
+    # Python env — not declared here, so `colcon build` never tries to fetch them.
     install_requires=["setuptools"],
     zip_safe=True,
     maintainer="aiis",

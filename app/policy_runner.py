@@ -68,6 +68,38 @@ class PolicyRunner:
             for k in self.cameras
         }
 
+        self.smoother = self._build_smoother()
+
+    def _build_smoother(self):
+        """Optional Ruckig jerk-limited smoother for the action stream (env-configured).
+
+        VPI_RUCKIG=0 disables it. VPI_FPS sets the control rate (default 30 Hz). Limits:
+        VPI_RUCKIG_MAX_{VEL,ACC,JERK} (scalars, broadcast); the default velocity is the
+        per-joint HDR35_20 arm limit with hand dims padded to the action dim.
+        """
+        if os.environ.get("VPI_RUCKIG", "1").lower() in ("0", "false", "no", ""):
+            return None
+        fps = float(os.environ.get("VPI_FPS", "30"))
+        # arm = HDR35_20 URDF joint velocity limits; hand dims pad to action_dim.
+        vel_env = os.environ.get("VPI_RUCKIG_MAX_VEL")
+        vmax = float(vel_env) if vel_env else [3.141, 3.141, 3.316, 5.410, 5.410, 7.330, 3.0]
+        amax = float(os.environ.get("VPI_RUCKIG_MAX_ACC", "12.0"))
+        jmax = float(os.environ.get("VPI_RUCKIG_MAX_JERK", "500.0"))
+        try:
+            from app.ruckig_smoother import RuckigSmoother
+
+            sm = RuckigSmoother(self.action_dim, 1.0 / fps, vmax, amax, jmax)
+            self._ruckig_cfg = {"fps": fps, "max_acceleration": amax, "max_jerk": jmax}
+            return sm
+        except Exception as exc:  # ruckig missing / bad limits -> serve without smoothing
+            import logging
+
+            logging.getLogger("vpi").warning(
+                "Ruckig smoothing disabled (%s). `pip install ruckig` to enable.", exc
+            )
+            self._ruckig_cfg = None
+            return None
+
     @staticmethod
     def _fit(img: np.ndarray, hw: tuple[int, int]) -> np.ndarray:
         """Resize RGB uint8 (H, W, 3) to (H, W) = hw if needed (bilinear)."""
@@ -80,6 +112,8 @@ class PolicyRunner:
     def reset(self) -> None:
         with self._lock:
             self.policy.reset()
+            if self.smoother is not None:
+                self.smoother.clear()  # next predict re-seeds the smoother at the new start
 
     @torch.no_grad()
     def predict(self, front_rgb: np.ndarray, wrist_rgb: np.ndarray, state: np.ndarray) -> np.ndarray:
@@ -96,7 +130,10 @@ class PolicyRunner:
         }
         with self._lock:
             action = self.postprocess(self.policy.select_action(self.preprocess(obs)))
-        return action.squeeze(0).float().cpu().numpy()
+            action = action.squeeze(0).float().cpu().numpy()
+            if self.smoother is not None:
+                action = self.smoother.step(action).astype(np.float32)  # jerk-limited command
+        return action
 
     def info(self) -> dict:
         return {
@@ -107,4 +144,5 @@ class PolicyRunner:
             "action_dim": self.action_dim,
             "scheduler": getattr(self.policy.config, "noise_scheduler_type", "unknown"),
             "num_inference_steps": getattr(self.policy.config, "num_inference_steps", None),
+            "ruckig": getattr(self, "_ruckig_cfg", None) if self.smoother is not None else None,
         }

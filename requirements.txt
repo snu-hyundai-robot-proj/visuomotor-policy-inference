@@ -6,6 +6,11 @@ pillow>=10.0
 numpy>=1.24
 requests>=2.31
 
+# Jerk-limited online trajectory generation applied to the served action stream.
+# Pinned to 0.12.2 — the newest release shipping a cp311 manylinux wheel, so it
+# installs prebuilt (no C++/cmake toolchain needed) on the python:3.11-slim image.
+ruckig==0.12.2
+
 # LeRobot — MUST come from the snu-hyundai-robot-proj fork: the model uses the
 # custom FlowMatch diffusion scheduler that is not present in upstream/PyPI lerobot.
 lerobot @ git+https://github.com/snu-hyundai-robot-proj/lerobot.git@main
