@@ -30,6 +30,7 @@ class InfoResponse(BaseModel):
     scheduler: str
     num_inference_steps: int | None
     ruckig: dict | None = Field(default=None, description="jerk-limited smoothing config, or null if disabled")
+    rtc: dict | None = Field(default=None, description="real-time chunking (async RTC) config, or null if disabled")
 
 
 class HealthResponse(BaseModel):

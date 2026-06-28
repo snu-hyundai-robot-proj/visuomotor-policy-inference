@@ -122,3 +122,6 @@ system_Teleop/src/Manus_/ManusSDK/lib/libManusSDK_Integrated.so
 # NOTE: examples/sample_episodes/ (~94 MB of recorded frames) is committed on purpose
 # as demo/replay data. If the repo gets too heavy, move it to Git LFS or drop it here:
 # examples/sample_episodes/
+
+# oh-my-claudecode local state (not for VCS)
+.omc/

@@ -69,6 +69,34 @@ class PolicyRunner:
         }
 
         self.smoother = self._build_smoother()
+        self.rtc = self._build_rtc()
+
+    def _build_rtc(self):
+        """Optional Real-Time Chunking: serve actions from lerobot's RTC ActionQueue while a
+        background thread regenerates the next chunk (no inference on the request path).
+        VPI_RTC=0 disables it (falls back to synchronous select_action). VPI_RTC_HORIZON
+        overrides the execution horizon."""
+        if os.environ.get("VPI_RTC", "1").lower() in ("0", "false", "no", ""):
+            return None
+        if str(getattr(self.policy.config, "noise_scheduler_type", "")).lower() != "flowmatch":
+            import logging
+            logging.getLogger("vpi").warning("VPI_RTC requested but policy is not FlowMatch; RTC disabled.")
+            return None
+        try:
+            from app.rtc_chunker import RTCChunker
+
+            fps = float(os.environ.get("VPI_FPS", "30"))
+            horizon = os.environ.get("VPI_RTC_HORIZON")
+            rtc = RTCChunker(self.policy, self.postprocess, self.device, fps=fps, use_rtc=True,
+                             refill_threshold=(int(horizon) + 1) if horizon else None)
+            self._rtc_cfg = {"fps": fps, "execution_horizon": rtc.exec_horizon,
+                             "refill_threshold": rtc.refill_threshold}
+            return rtc
+        except Exception as exc:
+            import logging
+            logging.getLogger("vpi").warning("RTC disabled (%s); using synchronous select_action.", exc)
+            self._rtc_cfg = None
+            return None
 
     def _build_smoother(self):
         """Optional Ruckig jerk-limited smoother for the action stream (env-configured).
@@ -111,7 +139,10 @@ class PolicyRunner:
 
     def reset(self) -> None:
         with self._lock:
-            self.policy.reset()
+            if self.rtc is not None:
+                self.rtc.reset()       # resets the policy + clears the RTC action queue
+            else:
+                self.policy.reset()
             if self.smoother is not None:
                 self.smoother.clear()  # next predict re-seeds the smoother at the new start
 
@@ -128,6 +159,14 @@ class PolicyRunner:
             "task": "",
             "robot_type": "",
         }
+        if self.rtc is not None:
+            # RTC: serve instantly from the action queue; inference overlaps execution in a bg thread
+            act = self.rtc.step(self.preprocess(obs))
+            action = act.float().cpu().numpy().reshape(-1)
+            if self.smoother is not None:
+                with self._lock:
+                    action = self.smoother.step(action).astype(np.float32)
+            return action
         with self._lock:
             action = self.postprocess(self.policy.select_action(self.preprocess(obs)))
             action = action.squeeze(0).float().cpu().numpy()
@@ -145,4 +184,5 @@ class PolicyRunner:
             "scheduler": getattr(self.policy.config, "noise_scheduler_type", "unknown"),
             "num_inference_steps": getattr(self.policy.config, "num_inference_steps", None),
             "ruckig": getattr(self, "_ruckig_cfg", None) if self.smoother is not None else None,
+            "rtc": getattr(self, "_rtc_cfg", None) if self.rtc is not None else None,
         }
