@@ -13,4 +13,6 @@ ruckig==0.12.2
 
 # LeRobot — MUST come from the snu-hyundai-robot-proj fork: the model uses the
 # custom FlowMatch diffusion scheduler that is not present in upstream/PyPI lerobot.
-lerobot @ git+https://github.com/snu-hyundai-robot-proj/lerobot.git@main
+# [transformers-dep] pulls transformers>=5.3.0,<6.0.0 — required by the DINOv3 vision
+# backbone (Dinov2Backbone -> AutoModel.from_pretrained("facebook/dinov3-...")).
+lerobot[transformers-dep] @ git+https://github.com/snu-hyundai-robot-proj/lerobot.git@main

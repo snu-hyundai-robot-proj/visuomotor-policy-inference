@@ -163,7 +163,7 @@ class ArmClient:
     def __init__(self, ip):
         self.net = NetClient(ip, 49000); self.api = OpenStreamAPI(self.net)
         self.parser = NDJSONParser(); self.disp = Dispatcher()
-        self.ok = threading.Event(); self.q = None; self._tfs = 0.0
+        self.ok = threading.Event(); self.q = None; self._tfs = 0.0; self._t0 = None
         self.disp.on_type["handshake_ack"] = lambda m: self.ok.set() if m.get("ok") else None
         self.disp.on_type["data"] = self._d
         self.disp.on_error = lambda e: print(f"[ARM ERR] code={e.get('error')} "
@@ -191,9 +191,14 @@ class ArmClient:
         return None if self.q is None else np.asarray(self.q[:6]) * math.pi / 180.0
 
     def insert(self, deg):
+        # time_from_start = REAL elapsed since the first point, not a fixed SEND_DT increment.
+        # This keeps the arm's scheduled trajectory aligned with wall-clock, so the gap from each
+        # predict() call doesn't make the arm drift behind the (immediate) hand.
+        now = time.perf_counter()
+        if self._t0 is None: self._t0 = now
+        self._tfs = now - self._t0
         self.api.joint_traject_insert_point({"interval": SEND_DT, "time_from_start": self._tfs,
                                              "look_ahead_time": LOOK_AHEAD, "point": [float(x) for x in deg]})
-        self._tfs += SEND_DT
 
     def stop(self):
         try: self.api.stop(target="control")
