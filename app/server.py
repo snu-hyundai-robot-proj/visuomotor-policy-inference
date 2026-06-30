@@ -72,7 +72,8 @@ def predict(req: PredictRequest) -> PredictResponse:
         front = decode_image(req.front_rgb)
         wrist = decode_image(req.wrist_rgb)
         state = np.asarray(req.state, dtype=np.float32)
-        action = runner.predict(front, wrist, state)
+        action = runner.predict(front, wrist, state,
+                                gripper_sensor=req.gripper_sensor, wrist_ft_sensor=req.wrist_ft_sensor)
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e)) from e
     except Exception as e:  # noqa: BLE001

@@ -15,6 +15,10 @@ class PredictRequest(BaseModel):
     front_rgb: str = Field(..., description="base64-encoded PNG/JPEG, scene/zivid camera (RGB)")
     wrist_rgb: str = Field(..., description="base64-encoded PNG/JPEG, wrist camera (RGB)")
     state: list[float] = Field(..., description="robot state vector (arm 6 + hand 20 = 26)")
+    gripper_sensor: list[float] | None = Field(
+        default=None, description="gripper tactile sensor vector (30); required by *_full / DINOv3 models")
+    wrist_ft_sensor: list[float] | None = Field(
+        default=None, description="wrist force/torque vector (6); required by *_full / DINOv3 models")
 
 
 class PredictResponse(BaseModel):

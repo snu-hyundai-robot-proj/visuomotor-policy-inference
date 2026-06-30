@@ -22,6 +22,8 @@ from lerobot.policies.factory import make_pre_post_processors
 FRONT_KEY = "observation.images.front_rgb"
 WRIST_KEY = "observation.images.wrist_rgb"
 STATE_KEY = "observation.state"
+GRIPPER_KEY = "observation.gripper_sensor"
+FT_KEY = "observation.wrist_ft_sensor"
 ACTION_KEY = "action"
 
 
@@ -48,6 +50,10 @@ class PolicyRunner:
         self.device = _resolve_device(device or os.environ.get("VPI_DEVICE", "cpu"))
         self._lock = threading.Lock()
 
+        # Make the deployed lerobot handle DINOv3 register tokens (no-op for resnet/dinov2).
+        from app.dinov3_compat import apply as _apply_dinov3_compat
+        _apply_dinov3_compat()
+
         policy = DiffusionPolicy.from_pretrained(self.model_id)
         policy.config.device = self.device  # saved config pins cuda; align to runtime device
         policy.to(self.device).eval()
@@ -67,6 +73,13 @@ class PolicyRunner:
             k: (int(policy.config.input_features[k].shape[1]), int(policy.config.input_features[k].shape[2]))
             for k in self.cameras
         }
+
+        # Extra proprio inputs some checkpoints require (e.g. the *_full / DINOv3 models).
+        feats = policy.config.input_features
+        self.needs_gripper = GRIPPER_KEY in feats
+        self.needs_ft = FT_KEY in feats
+        self.gripper_dim = int(feats[GRIPPER_KEY].shape[0]) if self.needs_gripper else 0
+        self.ft_dim = int(feats[FT_KEY].shape[0]) if self.needs_ft else 0
 
         self.smoother = self._build_smoother()
         self.rtc = self._build_rtc()
@@ -146,8 +159,17 @@ class PolicyRunner:
             if self.smoother is not None:
                 self.smoother.clear()  # next predict re-seeds the smoother at the new start
 
+    def _vec(self, x, dim, name):
+        if x is None:
+            raise ValueError(f"this model requires '{name}' ({dim} dims), but none was provided")
+        x = np.asarray(x, dtype=np.float32).reshape(-1)
+        if x.shape[-1] != dim:
+            raise ValueError(f"{name} must have {dim} dims, got {x.shape[-1]}")
+        return torch.from_numpy(x).unsqueeze(0).to(self.device)
+
     @torch.no_grad()
-    def predict(self, front_rgb: np.ndarray, wrist_rgb: np.ndarray, state: np.ndarray) -> np.ndarray:
+    def predict(self, front_rgb: np.ndarray, wrist_rgb: np.ndarray, state: np.ndarray,
+                gripper_sensor=None, wrist_ft_sensor=None) -> np.ndarray:
         if state.shape[-1] != self.state_dim:
             raise ValueError(f"state must have {self.state_dim} dims, got {state.shape[-1]}")
         front_rgb = self._fit(front_rgb, self.image_hw.get(FRONT_KEY, front_rgb.shape[:2]))
@@ -159,6 +181,10 @@ class PolicyRunner:
             "task": "",
             "robot_type": "",
         }
+        if self.needs_gripper:  # *_full / DINOv3 checkpoints also condition on these sensors
+            obs[GRIPPER_KEY] = self._vec(gripper_sensor, self.gripper_dim, "gripper_sensor")
+        if self.needs_ft:
+            obs[FT_KEY] = self._vec(wrist_ft_sensor, self.ft_dim, "wrist_ft_sensor")
         if self.rtc is not None:
             # RTC: serve instantly from the action queue; inference overlaps execution in a bg thread
             act = self.rtc.step(self.preprocess(obs))
