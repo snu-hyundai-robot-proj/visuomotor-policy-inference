@@ -169,8 +169,11 @@ class NodeManager(QObject):
         if not policy_path:
             self.node_.get_logger().warning(f"{process_name}: policy path is empty.")
 
+        # Map camera topics to the policy's expected keys (order-matched):
+        #   d405_rgb  (RealSense, wrist) -> observation.images.wrist_rgb
+        #   zivid_rgb (Zivid, scene/front) -> observation.images.front_rgb
         camera_topics = f"['/system_{side}/d405_rgb', '/system_{side}/zivid_rgb']"
-        camera_keys = "['observation.images.d405', 'observation.images.zivid']"
+        camera_keys = "['observation.images.wrist_rgb', 'observation.images.front_rgb']"
 
         if side == "left":
             gripper_args = "-p enable_gripper_output:=true -p gripper_action_start:=6 -p gripper_action_size:=20"

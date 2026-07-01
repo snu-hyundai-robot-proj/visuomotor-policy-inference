@@ -25,14 +25,13 @@ LEFT_DELTO_JOINT_NAMES = [
     "lj_dg_5_1", "lj_dg_5_2", "lj_dg_5_3", "lj_dg_5_4",
 ]
 
+# Must match the TRAINING observation.state layout: arm 6 (robot_joint) + hand 20
+# (gripper_joint) = 26, both in rad. The convert pipeline built observation.state as
+# robot_joint + gripper_joint, so the ROS node must compose it identically — otherwise
+# the hand portion is silently filled with target/pose/FT and predictions are garbage.
 DEFAULT_STATE_FIELDS = [
     "robot_joint",
-    "target_robot_joint",
-    "robot_pose",
-    "robot_ft",
     "gripper_joint",
-    "target_gripper_joint",
-    "gripper_sensor",
 ]
 
 

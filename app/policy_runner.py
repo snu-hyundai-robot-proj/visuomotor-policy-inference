@@ -181,9 +181,13 @@ class PolicyRunner:
             "task": "",
             "robot_type": "",
         }
-        if self.needs_gripper:  # *_full / DINOv3 checkpoints also condition on these sensors
+        # gripper/ft are listed in some configs but are NOT consumed by DiffusionPolicy
+        # conditioning (tactile_features is empty; only observation.state + images feed the
+        # network) and the image+state clients don't send them — so treat them as OPTIONAL:
+        # include only if the model lists them AND the caller actually provided them.
+        if self.needs_gripper and gripper_sensor is not None:
             obs[GRIPPER_KEY] = self._vec(gripper_sensor, self.gripper_dim, "gripper_sensor")
-        if self.needs_ft:
+        if self.needs_ft and wrist_ft_sensor is not None:
             obs[FT_KEY] = self._vec(wrist_ft_sensor, self.ft_dim, "wrist_ft_sensor")
         if self.rtc is not None:
             # RTC: serve instantly from the action queue; inference overlaps execution in a bg thread
