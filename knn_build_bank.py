@@ -15,8 +15,8 @@ from transformers import AutoModel
 from lerobot.datasets.lerobot_dataset import LeRobotDataset
 
 DINO = os.environ.get("VPI_KNN_DINO", "facebook/dinov3-vitb16-pretrain-lvd1689m")
-REPO = "local/hyundai_uiwang_left"
-ROOT = "/home/ngseo/remove_hook/lerobot/data/lerobot/hyundai_uiwang_left"
+REPO = os.environ.get("VPI_KNN_REPO", "local/hyundai_uiwang_left")
+ROOT = os.environ.get("VPI_KNN_ROOT", "/home/ngseo/remove_hook/lerobot/data/lerobot/hyundai_uiwang_left")
 OUT = os.environ.get("VPI_KNN_OUT", "/home/ngseo/visuomotor-policy-inference/knn_bank_left.npz")
 FKEY, WKEY = "observation.images.front_rgb", "observation.images.wrist_rgb"
 
