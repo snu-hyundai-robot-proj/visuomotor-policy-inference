@@ -32,8 +32,14 @@ STATE: dict[str, PolicyRunner] = {}
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    logger.info("Loading policy ...")
-    STATE["runner"] = PolicyRunner()
+    import os
+    if os.environ.get("VPI_POLICY", "diffusion").lower() == "knn":
+        from app.knn_runner import KNNPolicyRunner
+        logger.info("Loading kNN (VINN) policy ...")
+        STATE["runner"] = KNNPolicyRunner()
+    else:
+        logger.info("Loading diffusion policy ...")
+        STATE["runner"] = PolicyRunner()
     logger.info("Policy ready: %s", STATE["runner"].info())
     yield
     STATE.clear()
