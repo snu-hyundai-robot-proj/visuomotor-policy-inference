@@ -139,7 +139,7 @@ def launch_setup(context, *args, **kwargs):
         ("pilz", "config/pilz_industrial_motion_planner_planning.yaml"),
         ("ompl", "config/ompl_planning.yaml"),
     ]:
-        planner_yaml = load_yaml("hdf7_9_moveit_config", config_yaml)
+        planner_yaml = load_yaml("hdr35_20_moveit_config", config_yaml)
         planning_pipeline_config[planner_name].update(planner_yaml)
 
     moveit_controllers = {

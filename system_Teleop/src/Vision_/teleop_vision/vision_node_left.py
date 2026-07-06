@@ -21,6 +21,14 @@ from std_msgs.msg import Int32
 from system_interface.srv import DetectObject
 from system_interface.msg import StartRecording
 
+from geometry_msgs.msg import Pose
+from std_srvs.srv import Trigger
+from sensor_msgs.msg import PointCloud2
+
+from .fusion.transforms import pose_msg_to_T
+from .fusion.fuse import fuse, zivid_xyz_to_cloud
+from .fusion.integration import load_handeye, grab_d405_cloud, cloud_to_pointcloud2
+
 class VisionNode(Node):
     def __init__(self):
         super().__init__('vision_node_left')
@@ -37,6 +45,7 @@ class VisionNode(Node):
         os.makedirs(self.save_dir, exist_ok=True)
 
         self.camera_lock = threading.Lock()
+        self.rs_lock = threading.Lock()
         self.pub = self.system_side + '/frame_index'
         self.srv = self.create_service(DetectObject, self.system_side + '/detect_object', self.detect_object_callback)
         self.subcriber = self.create_subscription(StartRecording, self.system_side + '/start_recording', self.record_cmd_callback, 10)
@@ -83,6 +92,7 @@ class VisionNode(Node):
         self.init_zivid_camera()
         self.init_icp_model()
         self.init_rs_camera()
+        self.init_fusion()
         self.publish_running = True
         self.publish_thread = threading.Thread(target=self.publish_camera_stream, daemon=True)
         self.publish_thread.start()
@@ -102,7 +112,8 @@ class VisionNode(Node):
                     with self.camera.capture(self.settings_2d) as frame_2d:
                         zivid_rgba = frame_2d.image_rgba_srgb().copy_data()
 
-                frames = self.rs_pipeline.wait_for_frames()
+                with self.rs_lock:
+                    frames = self.rs_pipeline.wait_for_frames()
                 color_frame = frames.get_color_frame()
                 if not color_frame:
                     continue
@@ -270,11 +281,85 @@ class VisionNode(Node):
             self.rs_config.enable_device(target_serial)
             
             self.rs_config.enable_stream(rs.stream.color, 848, 480, rs.format.bgr8, 30)
-            self.rs_pipeline.start(self.rs_config)
+            # depth stream added for point-cloud fusion (publish loop still uses color only)
+            self.rs_config.enable_stream(rs.stream.depth, 848, 480, rs.format.z16, 30)
+            rs_profile = self.rs_pipeline.start(self.rs_config)
+            self.rs_align = rs.align(rs.stream.color)
+            depth_sensor = rs_profile.get_device().first_depth_sensor()
+            self.d405_depth_scale = float(depth_sensor.get_depth_scale())
+            _intr = rs_profile.get_stream(rs.stream.color).as_video_stream_profile().get_intrinsics()
+            self.d405_fx, self.d405_fy = _intr.fx, _intr.fy
+            self.d405_cx, self.d405_cy = _intr.ppx, _intr.ppy
             self.get_logger().info(f"Successfully connected to {side.capitalize()} RealSense camera (SN: {target_serial}).")
         except Exception as e:
             self.get_logger().error(f"Failed to initialize RealSense camera: {e}")
             raise
+
+    # ===== Zivid + D405 point-cloud fusion (classic, base frame, mm) =====
+    def init_fusion(self):
+        side = self.hand_side.lower()
+        self.euler_order = os.environ.get("FUSION_EULER_ORDER", "xyz")
+        he_path = os.path.join(self.package_dir, "camera", f"T_flange_from_d405_{side}.npy")
+        self.T_flange_from_d405 = load_handeye(he_path, self.get_logger())
+        self.latest_pose = None
+        self.create_subscription(Pose, f"/system_{side}/pose_states", self._on_pose, 10)
+        self.fused_cloud_publisher = self.create_publisher(
+            PointCloud2, self.system_side + "/fused_cloud", 1)
+        self.create_service(Trigger, self.system_side + "/fuse_cloud", self.fuse_cloud_callback)
+        self.fused_dir = os.path.join(os.getcwd(), "Record", side, "fused")
+        os.makedirs(self.fused_dir, exist_ok=True)
+        self.fused_index = 1
+
+    def _on_pose(self, msg):
+        self.latest_pose = msg
+
+    def fuse_cloud_callback(self, request, response):
+        try:
+            ok, msg = self.make_fused_cloud()
+            response.success = ok
+            response.message = msg
+        except Exception as e:
+            self.get_logger().error(f"fuse_cloud failed: {e}")
+            response.success = False
+            response.message = str(e)
+        return response
+
+    def make_fused_cloud(self):
+        """Capture Zivid + D405, transform both into base frame, ICP-refine, merge."""
+        if self.T_flange_from_d405 is None:
+            return False, "hand-eye not loaded (run handeye_calibrate)"
+        if self.latest_pose is None:
+            return False, "no flange pose on pose_states yet"
+
+        with self.camera_lock:
+            frame = self.camera.capture_2d_3d(self.settings_3d)
+        xyz = frame.point_cloud().copy_data("xyz")
+        rgba = frame.point_cloud().copy_data("rgba")
+        zivid_cam = zivid_xyz_to_cloud(xyz, rgba)
+
+        d405_cam = grab_d405_cloud(
+            self.rs_pipeline, self.rs_align,
+            self.d405_fx, self.d405_fy, self.d405_cx, self.d405_cy,
+            self.d405_depth_scale, self.rs_lock, color_is_bgr=True)
+
+        T_flange2base = pose_msg_to_T(self.latest_pose, order=self.euler_order)
+        T_d405_2base = T_flange2base @ self.T_flange_from_d405
+
+        fused, info = fuse(zivid_cam, self.T_cam2base, d405_cam, T_d405_2base, voxel_mm=2.0)
+
+        ply = os.path.join(self.fused_dir, f"{self.hand_side}_{self.fused_index:03d}_fused.ply")
+        o3d.io.write_point_cloud(ply, fused)
+        self.fused_cloud_publisher.publish(
+            cloud_to_pointcloud2(fused, "base", self.get_clock().now().to_msg()))
+        self.fused_index += 1
+        msg = (f"fused {info['n_fused']} pts (zivid={info['n_zivid']}, d405={info['n_d405']}, "
+               f"icp={info['icp_applied']}/{info['icp_fitness']:.2f}) -> {ply}")
+        self.get_logger().info(msg)
+        try:
+            del frame, xyz, rgba
+        except Exception:
+            pass
+        return True, msg
 
     def init_icp_model(self):
         try:

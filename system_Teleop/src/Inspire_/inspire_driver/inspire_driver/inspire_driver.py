@@ -1,9 +1,11 @@
 #!/usr/bin/env python3
 import os
 import glob
+import json
 import rclpy
 from rclpy.node import Node
 from std_msgs.msg import Float64MultiArray
+from std_msgs.msg import String
 from sensor_msgs.msg import JointState
 import time
 import threading
@@ -42,6 +44,14 @@ class InspireCommandSubscriber(Node):
         self.recv_current_joint = [0.0] * 6
         self.recv_sensor_data = [0.0] * 29
         self.target_joint = [0.0] * 6
+        self.final_target_joint = [0.0] * 6
+        self.publish_driver_diagnostics = self.declare_parameter(
+            'publish_driver_diagnostics', False
+        ).get_parameter_value().bool_value
+        self.driver_diagnostics_hz = self.declare_parameter(
+            'driver_diagnostics_hz', 10.0
+        ).get_parameter_value().double_value
+        self._last_diagnostics_publish = 0.0
         self.jointPub = self.create_publisher(
             JointState,
             '/inspire/joint_states',
@@ -53,6 +63,13 @@ class InspireCommandSubscriber(Node):
             '/inspire/tactile_sensor',
             1
         )
+        self.driverDiagPub = None
+        if self.publish_driver_diagnostics:
+            self.driverDiagPub = self.create_publisher(
+                String,
+                '/inspire/right/driver_diagnostics',
+                1
+            )
         self.create_subscription(
             Float64MultiArray, 
             '/inspire/right/target', 
@@ -92,6 +109,8 @@ class InspireCommandSubscriber(Node):
 
             if current_data[i] <= INSPIRE_FINGER_MIN_DEGREE[i]:
                 current_data[i] = INSPIRE_FINGER_MIN_DEGREE[i]
+        for i in range(6):
+            self.final_target_joint[i] = current_data[i]
         # self.get_logger().info(f"Target Angle : {current_data}")
         self.ser.move_fingers(current_data)
 
@@ -128,6 +147,44 @@ class InspireCommandSubscriber(Node):
 
         # print(msg)
         self.jointPub.publish(msg)
+        self.publish_diagnostics_if_enabled()
+
+    def publish_diagnostics_if_enabled(self):
+        if not self.publish_driver_diagnostics or self.driverDiagPub is None:
+            return
+        now = time.monotonic()
+        hz = self.driver_diagnostics_hz if self.driver_diagnostics_hz > 0 else 10.0
+        if now - self._last_diagnostics_publish < 1.0 / hz:
+            return
+        self._last_diagnostics_publish = now
+
+        payload = {
+            "timestamp_monotonic": now,
+            "angle_actual_deg": list(self.ser.received_angle),
+            "target_deg": [x / 10.0 for x in self.final_target_joint],
+            "target_raw_0p1deg": list(self.final_target_joint),
+            "j6": {
+                "angle_actual_deg": self.ser.received_angle[5],
+                "target_deg": self.final_target_joint[5] / 10.0,
+                "current": None,
+                "error_code": None,
+                "status_code": None,
+            },
+            "availability": {
+                "angle_actual": True,
+                "target_echo": True,
+                "current": False,
+                "error_code": False,
+                "status_code": False,
+                "force_actual": False,
+                "speed_actual": False,
+            },
+            "notes": (
+                "Diagnostics use only values already held by the driver: angleAct-derived "
+                "received_angle and final command target echo. No extra serial read loop is added."
+            ),
+        }
+        self.driverDiagPub.publish(String(data=json.dumps(payload, sort_keys=True)))
 
     def stop_thread(self):
         self.ser.destroy_thread()

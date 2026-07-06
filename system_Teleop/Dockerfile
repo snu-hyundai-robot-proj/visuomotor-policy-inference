@@ -100,6 +100,16 @@ RUN cd /tmp && \
     python3 -m pip install --no-cache-dir zivid==2.17.2 && \
     python3 -c "import zivid; print('zivid', zivid.__version__)"
 
+# MoveIt 2 — move_group, OMPL/Pilz planners, moveit_msgs, kinematics. Used ONLY by the
+# standalone (non-VLA) perception->plan->execute path; the teleop/VLA flow does not need it.
+# Added as a late layer so the torch/zivid layers above stay cached on rebuild.
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    ros-humble-moveit \
+    ros-humble-moveit-ros-move-group \
+    ros-humble-moveit-planners-ompl \
+    ros-humble-moveit-kinematics \
+    && rm -rf /var/lib/apt/lists/*
+
 # Initialize rosdep if the base image has not done it already.
 RUN if [ ! -f /etc/ros/rosdep/sources.list.d/20-default.list ]; then rosdep init; fi && \
     rosdep update

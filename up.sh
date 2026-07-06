@@ -30,9 +30,10 @@ for i in $(seq 1 30); do
   sleep 3; [ "$i" -eq 30 ] && echo "NOT ready (check: docker logs vpi_inference)"
 done
 
-# 4) reset hand (serial freeze) + vision (zivid disconnect) — common after a fresh up
-echo "[*] resetting hand + vision driver ..."
-docker restart "teleop_hand_${SIDE}" "teleop_vision_${SIDE}" >/dev/null 2>&1
+# 4) reset the HAND only (serial freeze common after a fresh up). Do NOT touch the vision node —
+# restarting it re-triggers a slow/fragile Zivid reconnect. Leave vision alone (user request).
+echo "[*] resetting hand driver (vision left untouched) ..."
+docker restart "teleop_hand_${SIDE}" >/dev/null 2>&1
 sleep 10
 
 # 5) verify

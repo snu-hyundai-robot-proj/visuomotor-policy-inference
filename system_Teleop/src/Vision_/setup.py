@@ -21,9 +21,11 @@ setup(
     entry_points={
         'console_scripts': [
         	# 'vision_recorder = teleop_vision.vision_recorder:main',
-        	# 'hook_pose_estimator = teleop_vision.hook_pose_estimator:main',
+        	'hook_pose_estimator = teleop_vision.hook_pose_estimator:main',
         	'system_vision_right = teleop_vision.vision_node_right:main',
         	'system_vision_left = teleop_vision.vision_node_left:main',
+        	'handeye_calibrate = teleop_vision.fusion.handeye_calibrate:main',
+        	'fusion_node = teleop_vision.fusion.fusion_node:main',
         	# 'system_vision_rf = teleop_vision.vision_node_rf:main',
         ],
     },
