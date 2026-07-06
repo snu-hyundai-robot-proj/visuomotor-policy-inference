@@ -26,7 +26,7 @@ timeout 120 docker compose --profile "$SIDE" up -d 2>&1 | grep -iE 'started|crea
 # 3) wait for the inference model to load
 echo -n "[*] inference: "
 for i in $(seq 1 30); do
-  curl -s --max-time 3 localhost:8000/info 2>/dev/null | grep -q "${SIDE}-flowmatch" && { echo "${SIDE} model ready"; break; }
+  curl -s --max-time 3 localhost:8000/info 2>/dev/null | grep -qE "knn-vinn|${SIDE}-flowmatch" && { echo "${SIDE} model ready"; break; }
   sleep 3; [ "$i" -eq 30 ] && echo "NOT ready (check: docker logs vpi_inference)"
 done
 

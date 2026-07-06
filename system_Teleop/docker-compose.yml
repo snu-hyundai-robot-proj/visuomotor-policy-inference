@@ -92,10 +92,16 @@ services:
     container_name: vpi_inference
     profiles: ["left"]
     environment:
-      - VPI_MODEL_ID=Ngseo/hyundai-uiwang-left-flowmatch
+      # Default = kNN VINN (chunk+temporal-ensembling). Set VPI_POLICY=diffusion for flowmatch.
+      - VPI_POLICY=${VPI_POLICY:-knn}
+      - VPI_KNN_BANK=/data/bank.npz          # vits16 encoder + chunk8 ensembling are the runner defaults
+      - VPI_MODEL_ID=Ngseo/hyundai-uiwang-left-flowmatch   # used only when VPI_POLICY=diffusion
       - VPI_DEVICE=cuda
       - HF_HOME=/hf
       - HF_HUB_OFFLINE=0
+    volumes:
+      - /home/bi/.cache/huggingface:/hf
+      - ${KNN_BANK_LEFT:-/home/bi/banks/knn_bank_left_vits16.npz}:/data/bank.npz:ro
 
   # ===== RIGHT side (profile: right) =====
   vision-right:
@@ -120,10 +126,17 @@ services:
     container_name: vpi_inference
     profiles: ["right"]
     environment:
-      - VPI_MODEL_ID=Ngseo/hyundai-uiwang-right-flowmatch
+      # Default = kNN VINN (chunk+temporal-ensembling). Set VPI_POLICY=diffusion for flowmatch.
+      # NOTE: needs a RIGHT kNN bank (build one like the left; only the left bank exists so far).
+      - VPI_POLICY=${VPI_POLICY:-knn}
+      - VPI_KNN_BANK=/data/bank.npz
+      - VPI_MODEL_ID=Ngseo/hyundai-uiwang-right-flowmatch   # used only when VPI_POLICY=diffusion
       - VPI_DEVICE=cuda
       - HF_HOME=/hf
       - HF_HUB_OFFLINE=0
+    volumes:
+      - /home/bi/.cache/huggingface:/hf
+      - ${KNN_BANK_RIGHT:-/home/bi/banks/knn_bank_right_vits16.npz}:/data/bank.npz:ro
 
 volumes:
   teleop_build:
